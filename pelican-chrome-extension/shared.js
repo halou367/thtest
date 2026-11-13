@@ -5,6 +5,26 @@
   const DEFAULT_API_KEY = "1234567890";
   const TIER_ORDER = ["low", "medium", "high", "max"];
   const TIER_CN = { low: "低 Low", medium: "中 Med", high: "高 High", max: "极高 Max" };
+  const TIER_SHORT = { low: "LOW", medium: "MED", high: "HIGH", max: "MAX" };
+
+  // Aligned with th.629717.cc.cd 3-level Vendor -> Short Model catalog
+  const SHORT_VENDOR_CATALOG = [
+    { id: "Claude", models: ["opus-5.5", "opus-5.6", "fable-5.1", "sonnet-5.5", "haiku-5.5", "opus-5", "sonnet-5", "fable-5", "opus-4.8", "opus-4.6", "haiku-4.5"] },
+    { id: "GPT", models: ["6.1-sol", "6-sol", "6-astra", "6-luna", "6.1-terra", "5.6-sol", "5.6-terra", "5.6-codex", "5.5", "5.4", "5.4-mini"] },
+    { id: "Gemini", models: ["4-carbon", "4-argon", "4-barium", "3.8-flash", "3.7-flash", "3.1-pro", "gemma-4-31b"] },
+    { id: "DeepSeek", models: ["v4.1-flash", "v4.1", "v3.2", "r1"] },
+    { id: "Qwen", models: ["3.8-max", "3.8-27b", "3.7-max", "3.5-397b-a17b", "3.6-plus", "3.5-plus", "3-coder"] },
+    { id: "GLM", models: ["5.3", "5.3-flash", "5.2", "5.1", "5", "5-turbo"] },
+    { id: "Grok", models: ["4.7", "4.6", "4.5"] },
+    { id: "Kimi", models: ["k3", "k3.1-pro", "k2.6", "k2.5"] },
+    { id: "Muse", models: ["spark-1.3", "spark-1.2", "spark-1.1", "spark-open", "wonder", "wonder-1.0", "llama-4-maverick"] },
+    { id: "MiniMax", models: ["m3", "m3.1", "m2.7", "m2.5", "m2.1"] },
+    { id: "MiMo", models: ["v2.6-pro", "v2.5-pro", "v2.6-flash"] },
+    { id: "Hunyuan", models: ["4", "4-preview", "3", "t1"] },
+    { id: "Doubao", models: ["seed-2.0-pro", "seed-2.0", "1.6-pro"] },
+    { id: "Mistral", models: ["large-4", "large-3", "medium-3.5", "medium-3.1"] },
+    { id: "Other", models: [] }
+  ];
 
   let svgLogoUid = 0;
 
@@ -26,10 +46,18 @@
     return (h >>> 0).toString(16) + "_" + s.length;
   }
 
+  function isRichClipboardFragment(txt) {
+    if (!txt) return false;
+    if (txt.includes("<!--StartFragment-->") || txt.includes("<!--EndFragment-->")) return true;
+    if (/^<meta\s+charset=/i.test(txt) && !/<svg[\s>]/i.test(txt) && !/<canvas[\s>]/i.test(txt)) return true;
+    return false;
+  }
+
   function parseSingleCodeBlock(candidate) {
     if (!candidate || typeof candidate !== "string") return null;
     const txt = candidate.trim();
     if (txt.length < 24 || txt.length > 3500000) return null;
+    if (isRichClipboardFragment(txt)) return null;
 
     // 1. Full HTML document: cleanly slice from <!DOCTYPE html or <html to last </html> if present
     const doctypeIdx = txt.search(/<!doctype\s+html/i);
@@ -49,7 +77,7 @@
       return { type: "HTML", code: txt };
     }
 
-    // 3. Interactive HTML/Canvas snippet without <html> wrapper (must have closing tags and visual/style/script structure)
+    // 3. Interactive HTML/Canvas snippet without <html> wrapper
     if (
       /^<(div|section|main|style|canvas|header)[\s>]/i.test(txt) &&
       /<(style|canvas|script)[\s>]/i.test(txt) &&
@@ -58,7 +86,7 @@
       return { type: "HTML", code: txt };
     }
 
-    // 4. Standalone SVG (supports <?xml ...?> and <!DOCTYPE svg ...> headers, takes from first <svg to last </svg>)
+    // 4. Standalone SVG
     const svgStart = txt.search(/(?:<\?xml[\s\S]*?\?>\s*)?(?:<!doctype\s+svg[\s\S]*?>\s*)?<svg[\s>]/i);
     if (svgStart >= 0) {
       const lower = txt.toLowerCase();
@@ -71,19 +99,17 @@
     return null;
   }
 
-  // Extract valid SVG or HTML code from clipboard text (supports multiple Markdown ```html / ```svg fences)
   function extractRenderableCode(rawText) {
     if (!rawText || typeof rawText !== "string") return null;
     const raw = rawText.trim();
     if (raw.length < 24 || raw.length > 3500000) return null;
+    if (isRichClipboardFragment(raw)) return null;
 
-    // If raw text itself starts directly as pure HTML or SVG, parse directly without stripping internal backticks in JS template literals!
     if (/^(?:<!doctype\s+html|<html[\s>]|<\?xml|<svg[\s>])/i.test(raw)) {
       const direct = parseSingleCodeBlock(raw);
       if (direct) return direct;
     }
 
-    // Otherwise scan all Markdown code fences and pick the largest valid HTML/SVG fence
     const fenceRe = /```(?:[a-zA-Z0-9_-]*)?[ \t]*\r?\n([\s\S]*?)```/g;
     let bestFence = null;
     let match;
@@ -95,7 +121,6 @@
     }
     if (bestFence) return bestFence;
 
-    // Also handle single-line / inline ```<svg...></svg>``` fences
     const inlineFence = raw.match(/```(?:html|htm|svg|xml)?\s*([\s\S]*?)```/i);
     if (inlineFence && inlineFence[1]) {
       const parsedInline = parseSingleCodeBlock(inlineFence[1]);
@@ -105,7 +130,42 @@
     return parseSingleCodeBlock(raw);
   }
 
-  // Accurate Open-Source vs Closed-Source Model Classifier across th.629717.cc.cd's 94+ models
+  // Extract largest sanitized static <svg> from SVG or HTML for instant zero-flash / CSP-resilient fallback
+  function extractSanitizedSvgMarkup(rawCode) {
+    if (!rawCode || typeof rawCode !== "string") return "";
+    const svgRe = /<svg\b[\s\S]*?<\/svg>/gi;
+    let best = "";
+    let m;
+    while ((m = svgRe.exec(rawCode)) !== null) {
+      if (m[0].length > best.length) best = m[0];
+    }
+    if (!best || best.length < 24) return "";
+
+    let safe = best
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, "")
+      .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+
+    safe = safe.replace(/^<svg\b([^>]*)>/i, (_full, attrs) => {
+      let next = attrs;
+      if (!/viewBox\s*=/i.test(next)) {
+        const wm = next.match(/\bwidth\s*=\s*["'](\d+(?:\.\d+)?)(?:px)?["']/i);
+        const hm = next.match(/\bheight\s*=\s*["'](\d+(?:\.\d+)?)(?:px)?["']/i);
+        if (wm && hm) next += ` viewBox="0 0 ${wm[1]} ${hm[1]}"`;
+      }
+      if (/viewBox\s*=/i.test(next)) {
+        next = next
+          .replace(/\s+\bwidth\s*=\s*["'][^"']*["']/gi, "")
+          .replace(/\s+\bheight\s*=\s*["'][^"']*["']/gi, "");
+        if (!/preserveAspectRatio\s*=/i.test(next)) {
+          next += ' preserveAspectRatio="xMidYMid meet"';
+        }
+      }
+      return `<svg${next}>`;
+    });
+    return safe;
+  }
+
   function isModelOpenSource(modelOrId, vendorArg, labelArg) {
     let id = "", label = "", vendor = "";
     if (typeof modelOrId === "string") {
@@ -119,12 +179,9 @@
     }
     const combined = id + " " + label + " " + vendor;
 
-    // Explicit open-weight releases inside mixed/proprietary vendors
     if (/\b(gpt-oss|gemma|muse-spark-open|llama|nemotron|olmo|falcon|yi-|baichuan)\b/.test(combined)) {
       return true;
     }
-
-    // Proprietary closed-source families
     if (/\b(claude|anthropic|opus|sonnet|haiku|fable)\b/.test(combined)) return false;
     if (/\b(gpt-5|gpt-6|openai|o1|o3|o4|sol|astra|luna|terra|codex)\b/.test(combined)) return false;
     if (/\b(gemini|google|argon|carbon|barium)\b/.test(combined)) return false;
@@ -133,7 +190,6 @@
     if (/\b(muse-spark-1|muse-wonder)\b/.test(combined)) return false;
     if (/\b(step-5|vierra|rotten-apple|inkling|cynosure|union-alpha|ox-alpha|\bbeam\b|solar-pro)\b/.test(combined)) return false;
 
-    // Hybrid open-weight labs (distinguish commercial API-only -max / -plus / -pro-preview)
     if (/\b(qwen|alibaba)\b/.test(combined)) {
       if (/\b(max|plus)\b/.test(combined)) return false;
       return true;
@@ -165,7 +221,7 @@
   function inferShortVendor(vendorOrLabel) {
     const v = String(vendorOrLabel || "").toLowerCase();
     if (v.includes("anthropic") || v.includes("claude") || /\b(opus|sonnet|haiku|fable)\b/.test(v)) return "Claude";
-    if (v.includes("openai") || v.includes("gpt") || /\b(sol|astra|luna|terra|codex)\b/.test(v)) return "GPT";
+    if (v.includes("openai") || v.includes("gpt") || /\b(sol|astra|luna|terra|codex|o[134])\b/.test(v)) return "GPT";
     if (v.includes("google") || v.includes("gemini") || v.includes("gemma") || /\b(argon|carbon|barium)\b/.test(v)) return "Gemini";
     if (v.includes("meta") || v.includes("muse") || v.includes("llama")) return "Muse";
     if (v.includes("deepseek")) return "DeepSeek";
@@ -176,8 +232,55 @@
     if (v.includes("xiaomi") || v.includes("mimo")) return "MiMo";
     if (v.includes("minimax")) return "MiniMax";
     if (v.includes("tencent") || v.includes("hunyuan")) return "Hunyuan";
+    if (v.includes("bytedance") || v.includes("doubao") || v.includes("seed")) return "Doubao";
     if (v.includes("mistral")) return "Mistral";
     return "Other";
+  }
+
+  function splitToShortVendorAndModel(vendorRaw, displayModelRaw) {
+    const dm = String(displayModelRaw || "").trim();
+    const sv = inferShortVendor(`${vendorRaw || ""} ${dm}`);
+    const stripMap = {
+      Claude: /^claude[-\s]*/i,
+      GPT: /^gpt[-\s]*/i,
+      Gemini: /^gemini[-\s]*/i,
+      Muse: /^muse[-\s]*/i,
+      DeepSeek: /^deepseek[-\s]*/i,
+      Qwen: /^qwen[-\s]*/i,
+      GLM: /^glm[-\s]*/i,
+      Grok: /^grok[-\s]*/i,
+      Kimi: /^kimi[-\s]*/i,
+      MiMo: /^mimo[-\s]*/i,
+      MiniMax: /^minimax[-\s]*/i,
+      Hunyuan: /^(?:tencent\s+)?hunyuan[-\s]*/i,
+      Doubao: /^doubao[-\s]*/i,
+      Mistral: /^mistral[-\s]*/i
+    };
+    let shortModel = dm;
+    if (stripMap[sv]) {
+      shortModel = dm.replace(stripMap[sv], "").trim() || dm;
+    }
+    shortModel = shortModel.toLowerCase().replace(/\s+/g, "-");
+    return {
+      shortVendor: sv === "Other" && vendorRaw && String(vendorRaw).toLowerCase() !== "other" ? String(vendorRaw) : sv,
+      shortModel: shortModel || "custom"
+    };
+  }
+
+  function getModelsForVendor(shortVendor, extraCandidates) {
+    const key = String(shortVendor || "").trim().toLowerCase();
+    const found = SHORT_VENDOR_CATALOG.find((x) => x.id.toLowerCase() === key);
+    const set = new Set(found ? found.models : []);
+    if (Array.isArray(extraCandidates)) {
+      extraCandidates.forEach((m) => {
+        if (!m) return;
+        const sp = splitToShortVendorAndModel(m.vendor, m.label || m.id);
+        if (sp.shortVendor.toLowerCase() === key && sp.shortModel) {
+          set.add(sp.shortModel);
+        }
+      });
+    }
+    return Array.from(set);
   }
 
   function getVendorLogoSvg(vendorRaw, size = 20) {
@@ -329,11 +432,16 @@
     DEFAULT_API_KEY,
     TIER_ORDER,
     TIER_CN,
+    TIER_SHORT,
+    SHORT_VENDOR_CATALOG,
     escapeHtml,
     fastHash,
     extractRenderableCode,
+    extractSanitizedSvgMarkup,
     isModelOpenSource,
     inferShortVendor,
+    splitToShortVendorAndModel,
+    getModelsForVendor,
     getVendorLogoSvg,
     computeFilteredVerdict
   };

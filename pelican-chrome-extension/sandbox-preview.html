@@ -10,21 +10,42 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #ffffff;
+      background: #f8fafc;
       font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", system-ui, sans-serif;
     }
+    #svgDirectHost {
+      width: 100%;
+      height: 100%;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #f8fafc;
+      overflow: hidden;
+    }
+    #svgDirectHost svg {
+      display: block;
+      width: 94% !important;
+      height: 94% !important;
+      max-width: 94% !important;
+      max-height: 94% !important;
+      flex: 0 0 auto;
+    }
     #stageHost {
+      position: relative;
       width: 100%;
       height: 100%;
       display: none;
       background: #ffffff;
+      overflow: hidden;
     }
     #stageHost iframe {
-      width: 100%;
-      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
       border: 0;
       display: block;
       background: #ffffff;
+      transform-origin: 0 0;
     }
     .empty-hint {
       position: fixed;
@@ -40,12 +61,19 @@
 </head>
 <body>
   <div id="emptyHint" class="empty-hint">等待剪贴板 SVG / HTML 预览...</div>
+  <div id="svgDirectHost"></div>
   <div id="stageHost"></div>
 
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search || "");
       const myCid = params.get("cid") || "default";
+
+      let lastRenderedId = "";
+      let activeFrame = null;
+      let isVirtualDesktopMode = false;
+      const VIRTUAL_W = 864;
+      const VIRTUAL_H = 540;
 
       const AUTOFIT_SNIPPET = `<style id="__tihu_fit_css">
 html,body{margin:0;padding:0;scrollbar-width:none;-ms-overflow-style:none;}
@@ -60,7 +88,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}
       if(w>0&&h>0)s.setAttribute("viewBox","0 0 "+w+" "+h);
     }
   }
-  var lastFitW=0,lastFitH=0;
   function fit(){
     try{
       var svgs=document.querySelectorAll("svg");
@@ -69,8 +96,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}
       if(!b)return;
       var vw=window.innerWidth,vh=window.innerHeight;
       if(vw<20||vh<20)return;
-      lastFitW=vw;lastFitH=vh;
-      b.style.transform="";b.style.transformOrigin="";
+      b.style.transform="";b.style.transformOrigin="";b.style.width="";b.style.height="";
       var visKids=[];
       for(var k=0;k<b.children.length;k++){
         var tag=b.children[k].tagName.toLowerCase();
@@ -81,12 +107,12 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}
         ensureSvgViewBox(onlySvg);
         d.style.margin="0";d.style.padding="0";d.style.width="100%";d.style.height="100%";d.style.overflow="hidden";
         b.style.margin="0";b.style.padding="0";b.style.width="100vw";b.style.height="100vh";b.style.overflow="hidden";
-        b.style.display="flex";b.style.alignItems="center";b.style.justifyContent="center";b.style.background="#ffffff";
+        b.style.display="flex";b.style.alignItems="center";b.style.justifyContent="center";
         onlySvg.style.setProperty("display","block","important");
-        onlySvg.style.setProperty("width","96vw","important");
-        onlySvg.style.setProperty("height","96vh","important");
-        onlySvg.style.setProperty("max-width","96vw","important");
-        onlySvg.style.setProperty("max-height","96vh","important");
+        onlySvg.style.setProperty("width","95vw","important");
+        onlySvg.style.setProperty("height","95vh","important");
+        onlySvg.style.setProperty("max-width","95vw","important");
+        onlySvg.style.setProperty("max-height","95vh","important");
         return;
       }
       var sw=Math.max(d.scrollWidth,b.scrollWidth),sh=Math.max(d.scrollHeight,b.scrollHeight);
@@ -97,28 +123,52 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}
         if(mr.width>100&&mr.right>maxW)maxW=mr.right;
         if(mr.height>100&&mr.bottom>maxH)maxH=mr.bottom;
       }
-      if(maxW>vw*1.02||maxH>vh*1.02){
-        var sc=Math.min(vw/maxW,vh/maxH)*0.96;
-        d.style.overflow="hidden";b.style.overflow="hidden";
-        b.style.transformOrigin="top left";
-        b.style.transform="translate("+Math.max(0,(vw-maxW*sc)/2)+"px,"+Math.max(0,(vh-maxH*sc)/2)+"px) scale("+sc+")";
+      if(maxW>vw+6||maxH>vh+6){
+        var sc=Math.min(vw/maxW,vh/maxH)*0.98;
+        if(sc<0.995&&sc>0.06){
+          d.style.overflow="hidden";
+          b.style.width=maxW+"px";
+          b.style.height=maxH+"px";
+          b.style.margin="0";
+          b.style.transformOrigin="0 0";
+          var dx=Math.max(0,(vw-maxW*sc)/2),dy=Math.max(0,(vh-maxH*sc)/2);
+          b.style.transform="translate("+dx.toFixed(1)+"px,"+dy.toFixed(1)+"px) scale("+sc.toFixed(4)+")";
+        }
       }
     }catch(e){}
   }
-  window.addEventListener("load",fit);
+  window.addEventListener("load",function(){fit();setTimeout(fit,160);});
   window.addEventListener("resize",fit);
-  if(typeof ResizeObserver!=="undefined"){
-    try{
-      new ResizeObserver(function(){
-        var nw=window.innerWidth,nh=window.innerHeight;
-        if(nw>=20&&nh>=20&&(Math.abs(nw-lastFitW)>2||Math.abs(nh-lastFitH)>2)){fit();}
-      }).observe(document.documentElement);
-    }catch(e){}
-  }
-  setTimeout(fit,40);
-  setTimeout(fit,180);
-  setTimeout(fit,450);
+  setTimeout(fit,35);
+  setTimeout(fit,320);
 })();<\/script>`;
+
+      function isPureStaticSvg(rawCode) {
+        const t = String(rawCode || "").trim();
+        if (/<(html|body|script|canvas|iframe|foreignObject)[\s>]/i.test(t)) return false;
+        if (/\son[a-z]+\s*=/i.test(t)) return false;
+        return /^(?:<\?xml[\s\S]*?\?>\s*)?(?:<!doctype\s+svg[\s\S]*?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>][\s\S]*<\/svg>$/i.test(t);
+      }
+
+      function normalizeSvgRoot(svgCode) {
+        return svgCode.replace(/<svg\b([^>]*)>/i, function (_m, attrs) {
+          let next = attrs;
+          if (!/viewBox\s*=/i.test(next)) {
+            const wm = next.match(/\bwidth\s*=\s*["'](\d+(?:\.\d+)?)(?:px)?["']/i);
+            const hm = next.match(/\bheight\s*=\s*["'](\d+(?:\.\d+)?)(?:px)?["']/i);
+            if (wm && hm) next += ' viewBox="0 0 ' + wm[1] + " " + hm[1] + '"';
+          }
+          if (/viewBox\s*=/i.test(next)) {
+            next = next
+              .replace(/\s+\bwidth\s*=\s*["'][^"']*["']/gi, "")
+              .replace(/\s+\bheight\s*=\s*["'][^"']*["']/gi, "");
+            if (!/preserveAspectRatio\s*=/i.test(next)) {
+              next += ' preserveAspectRatio="xMidYMid meet"';
+            }
+          }
+          return "<svg" + next + ">";
+        });
+      }
 
       function toSrcdoc(rawCode) {
         const trimmed = String(rawCode || "").trim();
@@ -134,7 +184,40 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}
           }
           return trimmed + AUTOFIT_SNIPPET;
         }
-        return "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" + AUTOFIT_SNIPPET + "</head><body>" + trimmed + "</body></html>";
+        return '<!DOCTYPE html><html><head><meta charset="utf-8">' + AUTOFIT_SNIPPET + "</head><body>" + trimmed + "</body></html>";
+      }
+
+      function syncFrameScale() {
+        if (!activeFrame) return;
+        const vw = window.innerWidth || 320;
+        const vh = window.innerHeight || 200;
+        if (!isVirtualDesktopMode || vw >= 720) {
+          activeFrame.style.width = "100%";
+          activeFrame.style.height = "100%";
+          activeFrame.style.transform = "";
+          return;
+        }
+        const sc = Math.min(vw / VIRTUAL_W, vh / VIRTUAL_H);
+        const dx = Math.max(0, (vw - VIRTUAL_W * sc) / 2);
+        const dy = Math.max(0, (vh - VIRTUAL_H * sc) / 2);
+        activeFrame.style.width = VIRTUAL_W + "px";
+        activeFrame.style.height = VIRTUAL_H + "px";
+        activeFrame.style.transform = "translate(" + dx.toFixed(1) + "px," + dy.toFixed(1) + "px) scale(" + sc.toFixed(4) + ")";
+      }
+
+      window.addEventListener("resize", syncFrameScale);
+
+      function sendAck(cid, renderId) {
+        try {
+          window.parent.postMessage(
+            {
+              type: "PELICAN_RENDER_ACK",
+              cid: cid || myCid,
+              renderId: renderId || 0
+            },
+            "*"
+          );
+        } catch (_) {}
       }
 
       function notifyReady(cid) {
@@ -154,34 +237,68 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}
 
         if (d.type !== "PELICAN_RENDER_CODE") return;
 
+        // Deduplicate retries for the SAME renderId so an active preview is never torn down mid-render!
+        if (d.renderId && d.renderId === lastRenderedId) {
+          sendAck(d.cid, d.renderId);
+          return;
+        }
+        lastRenderedId = d.renderId || "";
+
         const hint = document.getElementById("emptyHint");
-        const host = document.getElementById("stageHost");
+        const svgHost = document.getElementById("svgDirectHost");
+        const stageHost = document.getElementById("stageHost");
 
         if (!d.code) {
-          host.style.display = "none";
-          host.innerHTML = "";
+          activeFrame = null;
+          stageHost.style.display = "none";
+          stageHost.innerHTML = "";
+          svgHost.style.display = "none";
+          svgHost.innerHTML = "";
           hint.style.display = "flex";
-        } else {
-          hint.style.display = "none";
-          host.style.display = "block";
-          // Always mount a fresh iframe so identical consecutive copies re-render cleanly from scratch!
-          host.innerHTML = "";
-          const freshFrame = document.createElement("iframe");
-          freshFrame.setAttribute("scrolling", "no");
-          freshFrame.srcdoc = toSrcdoc(d.code);
-          host.appendChild(freshFrame);
+          sendAck(d.cid, d.renderId);
+          return;
         }
 
-        try {
-          window.parent.postMessage(
-            {
-              type: "PELICAN_RENDER_ACK",
-              cid: d.cid || myCid,
-              renderId: d.renderId || 0
-            },
-            "*"
-          );
-        } catch (_) {}
+        hint.style.display = "none";
+
+        // Fast-path 1: Pure static SVG -> instant crisp vector DOM render with zero nested iframe
+        if (isPureStaticSvg(d.code)) {
+          activeFrame = null;
+          stageHost.style.display = "none";
+          stageHost.innerHTML = "";
+          svgHost.innerHTML = normalizeSvgRoot(d.code);
+          const svgEl = svgHost.querySelector("svg");
+          if (svgEl && !svgEl.getAttribute("viewBox")) {
+            requestAnimationFrame(function () {
+              try {
+                const bb = svgEl.getBBox();
+                if (bb && bb.width > 0 && bb.height > 0) {
+                  svgEl.setAttribute("viewBox", bb.x + " " + bb.y + " " + bb.width + " " + bb.height);
+                }
+              } catch (_) {}
+            });
+          }
+          svgHost.style.display = "flex";
+          sendAck(d.cid, d.renderId);
+          return;
+        }
+
+        // Fast-path 2: Full HTML / Interactive SVG / Canvas -> virtual 864x540 desktop stage scaled cleanly
+        svgHost.style.display = "none";
+        svgHost.innerHTML = "";
+        stageHost.style.display = "block";
+        stageHost.innerHTML = "";
+
+        const freshFrame = document.createElement("iframe");
+        freshFrame.setAttribute("scrolling", "no");
+        freshFrame.setAttribute("sandbox", "allow-scripts");
+        isVirtualDesktopMode = true;
+        activeFrame = freshFrame;
+        syncFrameScale();
+        freshFrame.srcdoc = toSrcdoc(d.code);
+        stageHost.appendChild(freshFrame);
+
+        sendAck(d.cid, d.renderId);
       });
 
       notifyReady();

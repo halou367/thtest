@@ -3,27 +3,36 @@
   if (window.__pelicanClipboardHookInstalled) return;
   window.__pelicanClipboardHookInstalled = true;
 
-  let lastSetDataText = "";
-  let lastSetDataTs = 0;
+  let hookSeq = 0;
+  let lastPlainSetDataText = "";
+  let lastPlainSetDataTs = 0;
 
   function looksLikeRenderableCode(text) {
     if (typeof text !== "string" || text.length < 24 || text.length > 3500000) return false;
+    // Reject browser rich-text clipboard HTML wrappers (e.g. <!--StartFragment-->)
+    if (text.includes("<!--StartFragment-->") || /^<meta\s+charset=/i.test(text.trim())) {
+      return false;
+    }
     return /<svg[\s>]|<!doctype\s+html|<html[\s>]|<(canvas|style|script)[\s>]/i.test(text);
   }
 
   function emitCopiedText(text, method) {
     try {
       if (!looksLikeRenderableCode(text)) return;
+      const payload = {
+        source: "__PELICAN_EXT_CLIPBOARD__",
+        text: text,
+        method: method || "hook",
+        seq: ++hookSeq,
+        ts: Date.now()
+      };
       const targetWin = window.top || window;
-      targetWin.postMessage(
-        {
-          source: "__PELICAN_EXT_CLIPBOARD__",
-          text: text,
-          method: method || "hook",
-          ts: Date.now()
-        },
-        "*"
-      );
+      targetWin.postMessage(payload, "*");
+      if (targetWin !== window && window.parent && window.parent !== targetWin) {
+        try {
+          window.parent.postMessage(payload, "*");
+        } catch (_) {}
+      }
     } catch (_) {}
   }
 
@@ -54,7 +63,7 @@
       } catch (_) {}
     }
 
-    // 2. Hook Clipboard.prototype.write (ClipboardItem blobs)
+    // 2. Hook Clipboard.prototype.write (STRICTLY text/plain only, never rich-text text/html wrapper!)
     const origWrite =
       (proto && proto.write) ||
       (navigator.clipboard && navigator.clipboard.write);
@@ -66,13 +75,8 @@
           if (items && typeof items[Symbol.iterator] === "function") {
             for (const item of items) {
               if (!item || typeof item.getType !== "function" || !Array.isArray(item.types)) continue;
-              const preferredType = item.types.includes("text/plain")
-                ? "text/plain"
-                : item.types.includes("text/html")
-                ? "text/html"
-                : null;
-              if (preferredType) {
-                Promise.resolve(item.getType(preferredType))
+              if (item.types.includes("text/plain")) {
+                Promise.resolve(item.getType("text/plain"))
                   .then((blob) => (blob && typeof blob.text === "function" ? blob.text() : ""))
                   .then((txt) => {
                     if (txt) emitCopiedText(txt, "clipboardWrite");
@@ -91,16 +95,20 @@
     }
   } catch (_) {}
 
-  // 3. Hook DataTransfer.prototype.setData (captures exact payload from copy-to-clipboard / CodeMirror / Monaco)
+  // 3. Hook DataTransfer.prototype.setData (STRICTLY text/plain or text — never browser rich-text text/html!)
   try {
-    if (typeof DataTransfer !== "undefined" && DataTransfer.prototype && typeof DataTransfer.prototype.setData === "function") {
+    if (
+      typeof DataTransfer !== "undefined" &&
+      DataTransfer.prototype &&
+      typeof DataTransfer.prototype.setData === "function"
+    ) {
       const origSetData = DataTransfer.prototype.setData;
       DataTransfer.prototype.setData = function (format, data) {
         try {
-          const fmt = String(format || "").toLowerCase();
-          if ((fmt === "text/plain" || fmt === "text" || fmt === "text/html") && typeof data === "string" && data) {
-            lastSetDataText = data;
-            lastSetDataTs = Date.now();
+          const fmt = String(format || "").toLowerCase().trim();
+          if ((fmt === "text/plain" || fmt === "text") && typeof data === "string" && data) {
+            lastPlainSetDataText = data;
+            lastPlainSetDataTs = Date.now();
             emitCopiedText(data, "setData");
           }
         } catch (_) {}
@@ -118,9 +126,8 @@
         const res = origExecCommand.apply(this, arguments);
         try {
           if (String(cmd).toLowerCase() === "copy") {
-            // If DataTransfer.setData already fired during this execCommand, prefer that exact text!
-            if (lastSetDataTs >= beforeTs && lastSetDataText) {
-              emitCopiedText(lastSetDataText, "execCommand-setData");
+            if (lastPlainSetDataTs >= beforeTs && lastPlainSetDataText) {
+              emitCopiedText(lastPlainSetDataText, "execCommand-setData");
               return res;
             }
             let val = "";

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "鹈鹕实验室 · 剪贴板模型鉴定助手",
   "short_name": "鹈鹕鉴定",
-  "version": "1.1.0",
-  "description": "自动识别剪贴板中的 SVG / HTML 代码，生成实时预览小窗口并注释模型型号与推理强度（基于 th.629717.cc.cd），支持开源/闭源药丸按钮切换过滤。",
+  "version": "1.2.0",
+  "description": "自动识别剪贴板中的 SVG / HTML 代码，极简悬浮预览面板展示模型型号与推理强度，支持一键纠错并同步入库（基于 th.629717.cc.cd）。",
   "permissions": [
     "storage",
     "clipboardRead",
@@ -18,7 +18,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "鹈鹕实验室 · 剪贴板模型鉴定",
+    "default_title": "鹈鹕实验室 · 剪贴板模型鉴定与纠错入库",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -39,6 +39,8 @@
       "js": ["clipboard-hook.js"],
       "run_at": "document_start",
       "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
       "world": "MAIN"
     },
     {
@@ -50,6 +52,10 @@
   ],
   "sandbox": {
     "pages": ["sandbox-preview.html"]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';",
+    "sandbox": "sandbox allow-scripts allow-forms allow-modals; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; child-src 'self' * data: blob:; frame-src 'self' * data: blob:;"
   },
   "web_accessible_resources": [
     {

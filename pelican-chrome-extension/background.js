@@ -3,9 +3,11 @@ importScripts("shared.js");
 const {
   DEFAULT_API_BASE,
   DEFAULT_API_KEY,
+  TIER_ORDER,
   extractRenderableCode,
   fastHash,
-  isModelOpenSource
+  isModelOpenSource,
+  inferShortVendor
 } = globalThis.PelicanShared;
 
 const STORAGE_KEYS = {
@@ -104,7 +106,6 @@ async function ensureOffscreenDocument() {
     try {
       await creatingOffscreen;
     } catch (err) {
-      // Ignore error if another call already created the offscreen document concurrently
       if (!String(err).includes("Only a single offscreen")) {
         throw err;
       }
@@ -114,10 +115,9 @@ async function ensureOffscreenDocument() {
   }
 }
 
-// Cold-start resilient clipboard reader (retries if offscreen.js is still initializing)
 async function readSystemClipboardViaOffscreen() {
   await ensureOffscreenDocument();
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const res = await chrome.runtime.sendMessage({
         target: "offscreen",
@@ -127,16 +127,16 @@ async function readSystemClipboardViaOffscreen() {
         return typeof res.text === "string" ? res.text : "";
       }
     } catch (_) {}
-    await sleep(45 * (attempt + 1));
+    await sleep(35 * (attempt + 1));
   }
   return "";
 }
 
-async function runIdentifyRequest(rawCode, codeType = "SVG") {
+async function runIdentifyRequest(rawCode, codeType = "SVG", forceBypassCache = false) {
   const hash = fastHash(rawCode);
   await setLastFocusHash(hash);
 
-  if (verdictMemCache.has(hash)) {
+  if (!forceBypassCache && verdictMemCache.has(hash)) {
     const cached = verdictMemCache.get(hash);
     await persistLatestAndHistory(rawCode, codeType, hash, cached);
     return { ok: true, verdict: cached, hash, cached: true };
@@ -161,7 +161,7 @@ async function runIdentifyRequest(rawCode, codeType = "SVG") {
             "Content-Type": "application/json",
             "X-API-Key": cfg.apiKey
           },
-          body: JSON.stringify({ code: rawCode }),
+          body: JSON.stringify({ html: rawCode, code: rawCode }),
           signal: controller.signal
         });
       } finally {
@@ -179,7 +179,6 @@ async function runIdentifyRequest(rawCode, codeType = "SVG") {
 
       json.elapsedMs = json.elapsedMs || (Date.now() - t0);
 
-      // Keep compact fields on all 94 models so Open/Closed pill filtering is 100% exact
       if (Array.isArray(json.allModels)) {
         json.allModels = json.allModels.map((m) => ({
           id: m.id,
@@ -192,7 +191,7 @@ async function runIdentifyRequest(rawCode, codeType = "SVG") {
       }
 
       verdictMemCache.set(hash, json);
-      if (verdictMemCache.size > 35) {
+      if (verdictMemCache.size > 40) {
         const oldestKey = verdictMemCache.keys().next().value;
         verdictMemCache.delete(oldestKey);
       }
@@ -206,6 +205,123 @@ async function runIdentifyRequest(rawCode, codeType = "SVG") {
 
   inflightRequests.set(hash, reqPromise);
   return reqPromise;
+}
+
+function buildDisplayLabel(vendor, model) {
+  const v = String(vendor || "").trim();
+  const m = String(model || "").trim();
+  if (!v || v.toLowerCase() === "other") return m || "Unknown";
+  if (m.toLowerCase().startsWith(v.toLowerCase())) return m;
+  if (v.toLowerCase() === "gpt" && /^\d/.test(m)) return `GPT-${m}`;
+  return `${v} ${m}`;
+}
+
+async function submitSampleToBackend({ rawCode, codeType, vendor, model, tier, isCorrection, baseVerdict }) {
+  const parsed = extractRenderableCode(rawCode);
+  if (!parsed || parsed.code.length < 40) {
+    throw new Error("源码过短（至少需 40 字符有效 SVG / HTML）");
+  }
+
+  const cleanVendor = String(vendor || "").trim() || "Other";
+  const cleanModel = String(model || "").trim();
+  if (!cleanModel) {
+    throw new Error("请填写或选择正确的模型型号");
+  }
+  const cleanTier = TIER_ORDER.includes(String(tier || "").toLowerCase())
+    ? String(tier).toLowerCase()
+    : "high";
+
+  const cfg = await getConfig();
+  const hash = fastHash(parsed.code);
+  const sourceKey = `ext_${hash}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+
+  let resp;
+  try {
+    resp = await fetch(`${cfg.apiBase}/api/v1/samples`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": cfg.apiKey
+      },
+      body: JSON.stringify({
+        vendor: cleanVendor,
+        model: cleanModel,
+        tier: cleanTier,
+        html: parsed.code,
+        isCorrection: Boolean(isCorrection),
+        skipIdentify: true,
+        sourceKey
+      }),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data || !data.ok) {
+    throw new Error((data && data.error) || `入库失败 (HTTP ${resp.status})`);
+  }
+
+  const savedItem = data.item || null;
+  const savedDisplay =
+    (savedItem && savedItem.displayModel) || buildDisplayLabel(cleanVendor, cleanModel);
+  const shortV = inferShortVendor(`${cleanVendor} ${savedDisplay}`);
+
+  // Update cached & persisted verdict so UI immediately reflects the confirmed ground-truth
+  const prev = baseVerdict || verdictMemCache.get(hash) || {};
+  const nextDetected = {
+    ...(prev.detectedModel || {}),
+    id: (savedItem && savedItem.subModelId) || `${cleanVendor}-${cleanModel}`.toLowerCase(),
+    label: savedDisplay,
+    vendor: shortV === "Other" ? cleanVendor : shortV,
+    probability: 1,
+    rarity: (savedItem && savedItem.rarity) || "normal",
+    arenaRank: (savedItem && savedItem.arenaRank) || null
+  };
+
+  const prevList = Array.isArray(prev.allModels)
+    ? prev.allModels.filter((m) => String(m.label || "").toLowerCase() !== savedDisplay.toLowerCase())
+    : [];
+
+  const updatedVerdict = {
+    ...prev,
+    ok: true,
+    vendor: nextDetected.vendor,
+    model: cleanModel,
+    effortTier: cleanTier,
+    effortConfidence: 1,
+    tierProbabilities: TIER_ORDER.map((t) => ({ tier: t, probability: t === cleanTier ? 1 : 0 })),
+    detectedModel: nextDetected,
+    topModels: [nextDetected, ...prevList.slice(0, 4)],
+    allModels: [nextDetected, ...prevList],
+    exactArchiveMatch: { matched: true, specimenId: savedItem ? savedItem.id : sourceKey },
+    userIngested: {
+      vendor: cleanVendor,
+      model: cleanModel,
+      displayModel: savedDisplay,
+      tier: cleanTier,
+      isCorrection: Boolean(isCorrection),
+      specimenId: savedItem ? savedItem.id : "",
+      ts: Date.now()
+    }
+  };
+
+  verdictMemCache.set(hash, updatedVerdict);
+  await persistLatestAndHistory(parsed.code, codeType || parsed.type, hash, updatedVerdict);
+
+  return {
+    ok: true,
+    hash,
+    displayModel: savedDisplay,
+    tier: cleanTier,
+    isCorrection: Boolean(isCorrection),
+    item: savedItem,
+    verdict: updatedVerdict
+  };
 }
 
 async function persistLatestAndHistory(code, type, hash, verdict) {
@@ -222,6 +338,7 @@ async function persistLatestAndHistory(code, type, hash, verdict) {
     tier: verdict.effortTier || "high",
     probability: det.probability || 0,
     isOpen: isModelOpenSource(det),
+    ingested: Boolean(verdict.userIngested),
     verdict
   };
 
@@ -237,7 +354,6 @@ async function persistLatestAndHistory(code, type, hash, verdict) {
       [STORAGE_KEYS.HISTORY]: hist
     });
   } catch (_) {
-    // Fallback if storage quota is tight due to huge HTML payloads
     await chrome.storage.local.set({
       [STORAGE_KEYS.LATEST]: entry,
       [STORAGE_KEYS.HISTORY]: hist.slice(0, 4)
@@ -295,7 +411,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || !msg.type) return false;
   if (msg.target === "offscreen") return false;
 
-  // Direct live OS clipboard read (used by Popup & explicit copy verification)
   if (msg.type === "READ_RAW_CLIPBOARD") {
     (async () => {
       try {
@@ -329,8 +444,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: false, error: "未检测到有效的 SVG 或 HTML 代码" });
           return;
         }
-        const result = await runIdentifyRequest(parsed.code, parsed.type);
+        const result = await runIdentifyRequest(parsed.code, parsed.type, Boolean(msg.forceBypassCache));
         sendResponse({ ...result, code: parsed.code, codeType: parsed.type });
+      } catch (err) {
+        sendResponse({ ok: false, error: err && err.message ? err.message : String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "SUBMIT_SAMPLE") {
+    (async () => {
+      try {
+        const res = await submitSampleToBackend({
+          rawCode: msg.code,
+          codeType: msg.codeType,
+          vendor: msg.vendor,
+          model: msg.model,
+          tier: msg.tier,
+          isCorrection: msg.isCorrection,
+          baseVerdict: msg.baseVerdict
+        });
+        sendResponse(res);
       } catch (err) {
         sendResponse({ ok: false, error: err && err.message ? err.message : String(err) });
       }
@@ -349,7 +484,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const clipText = await readSystemClipboardViaOffscreen();
         const parsed = extractRenderableCode(clipText);
         if (!parsed) {
-          // If clipboard now holds plain non-code text, clear lastFocusHash so copying the same SVG again later will still trigger!
           if (clipText && clipText.trim().length > 0) {
             await setLastFocusHash("NON_CODE_" + fastHash(clipText.slice(0, 512)));
           }
@@ -363,10 +497,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             sendResponse({ ok: false, duplicate: true, hash: h });
             return;
           }
-        }
-        if (msg.mustDifferFromHash && h === msg.mustDifferFromHash) {
-          sendResponse({ ok: false, unchangedYet: true, hash: h });
-          return;
         }
         const result = await runIdentifyRequest(parsed.code, parsed.type);
         sendResponse({ ...result, code: parsed.code, codeType: parsed.type, hasCode: true });

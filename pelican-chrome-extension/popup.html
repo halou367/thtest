@@ -2,107 +2,190 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>鹈鹕实验室 · 剪贴板模型鉴定</title>
+  <title>鹈鹕鉴定 · 剪贴板模型鉴定与纠错入库</title>
   <style>
     :root {
-      --bg-base: #edf0f5;
-      --ink: #25303d;
-      --ink-soft: #506072;
-      --muted: #7a8899;
-      --glass-hairline: rgba(100, 116, 139, 0.15);
-      --glass-hairline-strong: rgba(100, 116, 139, 0.25);
-      --gold-border: rgba(196, 149, 69, 0.56);
-      --gold-bg: linear-gradient(135deg, rgba(255, 251, 240, 0.96) 0%, rgba(246, 234, 204, 0.86) 52%, rgba(255, 250, 238, 0.95) 100%);
-      --gold-glow: 0 10px 28px rgba(188, 140, 58, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.94);
-      --silver-border: rgba(132, 152, 175, 0.58);
-      --silver-bg: linear-gradient(135deg, rgba(248, 251, 255, 0.96) 0%, rgba(226, 234, 244, 0.88) 52%, rgba(246, 249, 253, 0.95) 100%);
-      --silver-glow: 0 10px 26px rgba(96, 118, 144, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.96);
-      --open-ink: #1f5f4b;
+      --ink: #1f2a37;
+      --ink-soft: #526275;
+      --muted: #7c8b9c;
+      --line: rgba(100, 116, 139, 0.16);
+      --line-strong: rgba(100, 116, 139, 0.26);
+      --open-ink: #1c624c;
       --open-bg: rgba(16, 185, 129, 0.14);
-      --open-border: rgba(16, 150, 108, 0.34);
-      --open-pill-active: linear-gradient(135deg, #276e59, #1e5645);
-      --closed-ink: #384d66;
+      --closed-ink: #384e66;
       --closed-bg: rgba(79, 109, 138, 0.13);
-      --closed-border: rgba(79, 109, 138, 0.32);
-      --closed-pill-active: linear-gradient(135deg, #3c526b, #2c3e52);
     }
 
     * { box-sizing: border-box; }
 
     body {
-      width: 400px;
+      width: 372px;
       margin: 0;
       padding: 0;
-      background-color: var(--bg-base);
-      background-image:
-        radial-gradient(circle at 12% 10%, rgba(164, 182, 200, 0.28) 0%, transparent 48%),
-        radial-gradient(circle at 88% 15%, rgba(206, 190, 162, 0.22) 0%, transparent 45%),
-        linear-gradient(180deg, #f2f5f9 0%, #e7ecf2 100%);
+      background: linear-gradient(180deg, #f4f7fb 0%, #eaeff6 100%);
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-      line-height: 1.45;
+      line-height: 1.42;
       -webkit-font-smoothing: antialiased;
     }
 
     .popup-header {
-      padding: 11px 14px;
-      background: rgba(245, 248, 252, 0.88);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.88);
+      padding: 9px 12px;
+      background: rgba(246, 249, 253, 0.92);
+      border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      gap: 6px;
     }
-
-    .brand { display: flex; align-items: center; gap: 8px; }
+    .brand { display: flex; align-items: center; gap: 6px; min-width: 0; }
     .brand-mark {
-      width: 27px;
-      height: 27px;
-      border-radius: 8px;
-      background: linear-gradient(145deg, #3b4a5b, #56697e);
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      background: linear-gradient(145deg, #334354, #51657a);
       color: #ffffff;
       display: grid;
       place-items: center;
-      font-size: 12.5px;
+      font-size: 11.5px;
       font-weight: 700;
-      box-shadow: 0 2px 7px rgba(45, 58, 74, 0.18);
+      flex-shrink: 0;
     }
-    .brand-title { font-size: 13.5px; font-weight: 760; color: var(--ink); }
+    .brand-title { font-size: 13px; font-weight: 760; color: var(--ink); white-space: nowrap; }
     .meta-chip {
-      font-size: 10.2px;
-      font-weight: 650;
+      font-size: 10px;
+      font-weight: 600;
       color: var(--ink-soft);
-      background: rgba(255, 255, 255, 0.82);
-      border: 1px solid var(--glass-hairline);
-      padding: 1.5px 7px;
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid var(--line);
+      padding: 1px 6.5px;
       border-radius: 999px;
+      white-space: nowrap;
     }
 
-    .head-actions { display: flex; align-items: center; gap: 5px; }
-    .mini-action-btn {
+    .head-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .mini-btn {
       appearance: none;
-      border: 1px solid var(--glass-hairline-strong);
-      background: rgba(255, 255, 255, 0.84);
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.88);
       color: var(--ink-soft);
-      font-size: 11px;
+      font-size: 10.8px;
       font-weight: 650;
-      padding: 4px 8.5px;
-      border-radius: 7px;
+      padding: 3.5px 7.5px;
+      border-radius: 6px;
       cursor: pointer;
       font-family: inherit;
     }
-    .mini-action-btn:hover { background: #ffffff; color: var(--ink); }
-    .mini-action-btn.primary { background: #364556; border-color: #364556; color: #ffffff; }
+    .mini-btn:hover { background: #ffffff; color: var(--ink); }
+    .mini-btn.primary { background: #2b3b4e; border-color: #2b3b4e; color: #ffffff; }
 
-    .source-pill-bar { padding: 9px 14px 7px; }
+    .popup-main {
+      padding: 10px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .drawer-box {
+      display: none;
+      padding: 9px 10px;
+      border-radius: 11px;
+      background: #ffffff;
+      border: 1px solid var(--line-strong);
+      flex-direction: column;
+      gap: 7px;
+    }
+    .drawer-box.open { display: flex; }
+
+    .code-area {
+      width: 100%;
+      height: 76px;
+      resize: vertical;
+      border-radius: 7px;
+      border: 1px solid var(--line-strong);
+      padding: 6px 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--ink);
+      outline: none;
+    }
+    .cfg-field label { display: block; font-size: 10.5px; font-weight: 650; color: var(--ink-soft); margin-bottom: 3px; }
+    .inp-ctrl {
+      width: 100%;
+      padding: 5px 7px;
+      border-radius: 7px;
+      border: 1px solid var(--line-strong);
+      background: #f9fbfd;
+      color: var(--ink);
+      font-size: 11.5px;
+      font-weight: 650;
+      font-family: inherit;
+      outline: none;
+    }
+    .inp-ctrl:focus { border-color: #3b6b9c; background: #ffffff; }
+
+    /* Unobstructed Preview Stage */
+    .preview-stage-wrap {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      background: #f8fafc;
+      aspect-ratio: 16 / 10;
+    }
+    .svg-fallback-stage {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #f8fafc;
+      z-index: 1;
+      padding: 6px;
+    }
+    .svg-fallback-stage svg {
+      width: 94% !important;
+      height: 94% !important;
+      max-width: 94% !important;
+      max-height: 94% !important;
+      display: block;
+    }
+    .preview-stage-wrap iframe {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: #f8fafc;
+    }
+    .stage-corner-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      z-index: 5;
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      background: rgba(255, 255, 255, 0.86);
+      backdrop-filter: blur(8px);
+      color: var(--ink-soft);
+      font-size: 10.2px;
+      font-weight: 650;
+      padding: 2.5px 7px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .stage-corner-btn:hover { background: #ffffff; color: var(--ink); }
+
+    /* Compact Filter Strip */
     .pill-group {
       display: flex;
       align-items: center;
-      gap: 3px;
-      background: rgba(220, 228, 237, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.88);
-      padding: 3px;
-      border-radius: 999px;
+      gap: 2px;
+      background: rgba(220, 228, 238, 0.76);
+      padding: 2.5px;
+      border-radius: 9px;
     }
     .source-pill-btn {
       flex: 1;
@@ -110,392 +193,359 @@
       border: 0;
       background: transparent;
       color: var(--ink-soft);
-      font-size: 11.6px;
-      font-weight: 720;
-      padding: 5px 8px;
-      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 680;
+      padding: 4px 6px;
+      border-radius: 7px;
       cursor: pointer;
-      transition: all 0.18s ease;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 4px;
       font-family: inherit;
     }
-    .source-pill-btn.active[data-filter="all"] {
+    .source-pill-btn.active {
       background: #ffffff;
       color: var(--ink);
-      box-shadow: 0 2px 7px rgba(31, 43, 58, 0.09);
+      box-shadow: 0 1px 4px rgba(15, 26, 40, 0.08);
     }
-    .source-pill-btn.active[data-filter="open"] {
-      background: var(--open-pill-active);
-      color: #ffffff;
-      box-shadow: 0 3px 10px rgba(31, 95, 75, 0.25);
-    }
-    .source-pill-btn.active[data-filter="closed"] {
-      background: var(--closed-pill-active);
-      color: #ffffff;
-      box-shadow: 0 3px 10px rgba(44, 62, 82, 0.24);
-    }
-    .pill-pct {
-      font-size: 10px;
-      font-weight: 650;
-      opacity: 0.8;
-      padding: 0.5px 5px;
-      border-radius: 999px;
-      background: rgba(100, 116, 139, 0.12);
-    }
-    .source-pill-btn.active .pill-pct { background: rgba(255, 255, 255, 0.22); color: inherit; opacity: 0.96; }
+    .source-pill-btn.active[data-filter="open"] { background: #226650; color: #ffffff; }
+    .source-pill-btn.active[data-filter="closed"] { background: #364b63; color: #ffffff; }
+    .pill-pct { font-size: 9.8px; opacity: 0.78; }
 
-    .popup-main { padding: 0 14px 14px; }
-
-    /* Collapsible Drawers (Paste Input & Settings) */
-    .drawer-box {
-      display: none;
-      margin-bottom: 10px;
-      padding: 10px 11px;
+    /* Unified Single Verdict Card */
+    .verdict-card {
       border-radius: 12px;
-      background: rgba(255, 255, 255, 0.86);
-      border: 1px solid var(--glass-hairline-strong);
-    }
-    .drawer-box.open { display: block; }
-
-    .code-area {
-      width: 100%;
-      height: 82px;
-      resize: vertical;
-      border-radius: 8px;
-      border: 1px solid var(--glass-hairline-strong);
-      padding: 7px 9px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
-      color: var(--ink);
-      outline: none;
-      margin-bottom: 7px;
-    }
-
-    .cfg-row { margin-bottom: 8px; }
-    .cfg-row label { display: block; font-size: 11px; font-weight: 650; color: var(--ink-soft); margin-bottom: 3px; }
-    .cfg-inp {
-      width: 100%;
-      padding: 6px 9px;
-      border-radius: 8px;
-      border: 1px solid var(--glass-hairline-strong);
-      font-size: 12px;
-      color: var(--ink);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-
-    /* Preview Stage + Model Annotation */
-    .preview-stage-wrap {
-      position: relative;
-      border-radius: 13px;
-      overflow: hidden;
-      border: 1px solid var(--glass-hairline-strong);
-      background: #f6f8fb;
-      aspect-ratio: 16 / 10;
-    }
-    .preview-stage-wrap iframe {
-      width: 100%;
-      height: 100%;
-      border: 0;
-      display: block;
+      padding: 10px 11px;
       background: #ffffff;
+      border: 1px solid var(--line-strong);
     }
-    .preview-top-actions {
-      position: absolute;
-      top: 7px;
-      right: 7px;
-      display: flex;
-      gap: 4px;
-      z-index: 5;
+    .verdict-card.rarity-gold {
+      background: linear-gradient(135deg, #fffcf2 0%, #f9efd8 100%);
+      border-color: rgba(196, 149, 69, 0.52);
     }
-    .stage-mini-btn {
-      appearance: none;
-      border: 1px solid rgba(255, 255, 255, 0.88);
-      background: rgba(255, 255, 255, 0.84);
-      backdrop-filter: blur(10px);
-      color: var(--ink-soft);
-      font-size: 10.2px;
-      font-weight: 650;
-      padding: 2.5px 7px;
-      border-radius: 7px;
-      cursor: pointer;
+    .verdict-card.rarity-silver {
+      background: linear-gradient(135deg, #f9fbff 0%, #eaeff7 100%);
+      border-color: rgba(132, 152, 175, 0.54);
     }
-    .preview-model-annot {
-      position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 8px;
-      z-index: 5;
+    .verdict-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .verdict-left { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .logo-box {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+    .model-title {
+      font-size: 14.5px;
+      font-weight: 800;
+      color: var(--ink);
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .badge-row { display: flex; align-items: center; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+    .tag { font-size: 9.8px; font-weight: 700; padding: 1px 5.5px; border-radius: 5px; white-space: nowrap; }
+    .tag.open { background: var(--open-bg); color: var(--open-ink); }
+    .tag.closed { background: var(--closed-bg); color: var(--closed-ink); }
+    .tag.tier { background: rgba(31, 42, 55, 0.08); color: var(--ink); }
+    .tag.gold { background: rgba(196, 149, 69, 0.2); color: #7c581c; }
+    .tag.silver { background: rgba(120, 139, 161, 0.2); color: #3d4f63; }
+    .tag.ingested { background: rgba(16, 185, 129, 0.18); color: #0f5c41; }
+    .conf-num { font-size: 18px; font-weight: 850; color: var(--ink); flex-shrink: 0; }
+
+    .verdict-actions {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 6px;
-      padding: 5.5px 9px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.9);
-      backdrop-filter: blur(14px);
-      border: 1px solid rgba(255, 255, 255, 0.95);
-      box-shadow: 0 6px 16px rgba(24, 36, 52, 0.12);
-    }
-    .preview-model-annot.annot-gold {
-      background: linear-gradient(135deg, rgba(255, 251, 240, 0.94), rgba(248, 237, 210, 0.9));
-      border-color: rgba(196, 149, 69, 0.56);
-    }
-    .preview-model-annot.annot-silver {
-      background: linear-gradient(135deg, rgba(248, 251, 255, 0.95), rgba(230, 238, 247, 0.9));
-      border-color: rgba(132, 152, 175, 0.56);
-    }
-    .annot-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
-    .annot-model-name { font-size: 12px; font-weight: 780; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .annot-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-
-    .micro-badge { font-size: 9.8px; font-weight: 750; padding: 1.5px 5.5px; border-radius: 999px; white-space: nowrap; }
-    .micro-badge.open { background: var(--open-bg); color: var(--open-ink); border: 1px solid var(--open-border); }
-    .micro-badge.closed { background: var(--closed-bg); color: var(--closed-ink); border: 1px solid var(--closed-border); }
-    .micro-badge.tier { background: rgba(54, 69, 86, 0.11); color: var(--ink); text-transform: uppercase; }
-    .micro-badge.conf { background: #364556; color: #ffffff; }
-
-    @keyframes foilSweep {
-      0% { transform: translateX(-130%) skewX(-22deg); }
-      100% { transform: translateX(230%) skewX(-22deg); }
-    }
-    .gacha-hero {
-      position: relative;
-      overflow: hidden;
-      border-radius: 14px;
-      padding: 11px 12px;
-      margin-top: 9px;
-      border: 1px solid var(--glass-hairline-strong);
-      background: rgba(255, 255, 255, 0.8);
-    }
-    .gacha-hero::after {
-      content: "";
-      position: absolute;
-      top: 0; bottom: 0; left: 0;
-      width: 48%;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.62), transparent);
-      transform: translateX(-140%) skewX(-22deg);
-      pointer-events: none;
-    }
-    .gacha-hero.rarity-gold { background: var(--gold-bg); border: 1.5px solid var(--gold-border); box-shadow: var(--gold-glow); }
-    .gacha-hero.rarity-gold::after { animation: foilSweep 1.15s cubic-bezier(0.22, 1, 0.36, 1) 1; }
-    .gacha-hero.rarity-silver { background: var(--silver-bg); border: 1.5px solid var(--silver-border); box-shadow: var(--silver-glow); }
-    .gacha-hero.rarity-silver::after { animation: foilSweep 1.15s cubic-bezier(0.22, 1, 0.36, 1) 1; }
-
-    .gacha-top-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 7px; }
-    .rarity-pill { font-size: 10.2px; font-weight: 750; padding: 2px 8.5px; border-radius: 999px; background: rgba(100, 116, 139, 0.14); color: var(--ink-soft); }
-    .rarity-gold .rarity-pill { background: linear-gradient(135deg, #c99a49, #ad7e2f); color: #fffdf8; }
-    .rarity-silver .rarity-pill { background: linear-gradient(135deg, #7d92a8, #5e7389); color: #f8fafc; }
-    .archive-hit-tag { font-size: 10px; font-weight: 650; color: var(--ink-soft); background: rgba(255, 255, 255, 0.78); border: 1px solid rgba(100, 116, 139, 0.18); padding: 1.5px 7.5px; border-radius: 999px; }
-
-    .gacha-main-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .gacha-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .gacha-logo-frame { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: rgba(255, 255, 255, 0.9); border: 1px solid rgba(100, 116, 139, 0.16); flex-shrink: 0; }
-    .gacha-model-name { font-size: 16.5px; font-weight: 800; color: var(--ink); line-height: 1.2; }
-    .rarity-gold .gacha-model-name { color: #463210; }
-    .gacha-model-sub { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
-
-    .conf-ring-wrap { position: relative; width: 48px; height: 48px; flex-shrink: 0; display: grid; place-items: center; }
-    .conf-ring-pct { position: absolute; font-size: 11px; font-weight: 800; color: var(--ink); }
-
-    .filter-notice {
-      margin-top: 7px;
-      padding: 5.5px 8px;
-      border-radius: 8px;
-      font-size: 10.6px;
-      background: rgba(245, 158, 11, 0.13);
-      border: 1px solid rgba(217, 119, 6, 0.28);
-      color: #92400e;
-      display: none;
-    }
-
-    .vis-block {
       margin-top: 8px;
-      padding: 9px 11px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.66);
-      border: 1px solid var(--glass-hairline);
+      padding-top: 8px;
+      border-top: 1px dashed var(--line);
     }
-    .vis-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--ink-soft); margin-bottom: 6px; }
-    .tier-segments { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
-    .tier-seg { border-radius: 8px; padding: 4.5px 4px; text-align: center; background: rgba(255, 255, 255, 0.65); border: 1px solid var(--glass-hairline); }
-    .tier-seg.active { background: #ffffff; border-color: rgba(79, 109, 138, 0.55); box-shadow: 0 2px 8px rgba(54, 69, 86, 0.08); }
-    .tier-seg-label { font-size: 9.6px; font-weight: 700; text-transform: uppercase; color: var(--muted); }
-    .tier-seg.active .tier-seg-label { color: var(--ink); }
-    .tier-seg-val { font-size: 11.5px; font-weight: 750; color: var(--ink); }
-
-    .cand-row { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 7px; padding: 3.5px 0; }
-    .cand-name-line { display: flex; align-items: center; gap: 4px; font-size: 11.2px; font-weight: 660; color: var(--ink); margin-bottom: 2.5px; flex-wrap: wrap; }
-    .mini-rank-tag { font-size: 9.2px; font-weight: 750; padding: 0.5px 4.5px; border-radius: 4px; }
-    .mini-rank-tag.gold { background: rgba(196, 149, 69, 0.18); color: #7d5b22; }
-    .mini-rank-tag.silver { background: rgba(122, 143, 166, 0.18); color: #3d4f63; }
-    .mini-rank-tag.open { background: var(--open-bg); color: var(--open-ink); }
-    .mini-rank-tag.closed { background: rgba(100, 116, 139, 0.12); color: var(--ink-soft); }
-    .prob-track { height: 5px; border-radius: 999px; background: rgba(148, 163, 184, 0.18); overflow: hidden; }
-    .prob-fill { height: 100%; border-radius: 999px; transition: width 0.25s ease; }
-    .cand-pct { font-size: 11px; font-weight: 720; color: var(--ink-soft); min-width: 38px; text-align: right; }
-    .vlogo { display: inline-grid; place-items: center; flex-shrink: 0; }
-
-    .history-strip { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
-    .hist-chip {
+    .act-btn {
       appearance: none;
-      border: 1px solid var(--glass-hairline);
-      background: rgba(255, 255, 255, 0.82);
-      border-radius: 999px;
-      padding: 3px 8px 3px 5px;
-      font-size: 10.8px;
+      border: 1px solid var(--line-strong);
+      background: #f8fafc;
+      color: var(--ink-soft);
+      font-size: 11px;
+      font-weight: 680;
+      padding: 4.5px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .act-btn:hover { background: #ffffff; color: var(--ink); }
+    .act-btn.active { background: #2b3b4e; color: #ffffff; border-color: #2b3b4e; }
+    .act-btn.correct-btn { color: #1e4b7a; border-color: rgba(43, 76, 111, 0.3); background: rgba(235, 243, 252, 0.65); }
+    .act-btn.correct-btn.active { background: #24466b; color: #ffffff; border-color: #24466b; }
+
+    .toast-inline {
+      display: none;
+      font-size: 11px;
       font-weight: 650;
+      padding: 6px 9px;
+      border-radius: 8px;
+      background: rgba(16, 185, 129, 0.13);
+      border: 1px solid rgba(16, 150, 108, 0.3);
+      color: #0f5c41;
+    }
+    .toast-inline.err {
+      background: rgba(239, 68, 68, 0.11);
+      border-color: rgba(220, 38, 38, 0.28);
+      color: #991b1b;
+    }
+    .toast-inline.show { display: block; }
+
+    .drawer-lbl {
+      font-size: 10.2px;
+      font-weight: 700;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .chip-scroll {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+    .chip-scroll::-webkit-scrollbar { display: none; }
+    .quick-chip {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: #f4f7fa;
       color: var(--ink);
+      font-size: 10.3px;
+      font-weight: 650;
+      padding: 2.5px 7px;
+      border-radius: 999px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+      flex-shrink: 0;
       display: inline-flex;
       align-items: center;
       gap: 4px;
+    }
+    .quick-chip:hover { background: #e8eef5; }
+    .quick-chip.sel { background: #24466b; color: #ffffff; border-color: #24466b; }
+
+    .form-grid-2 { display: grid; grid-template-columns: 106px 1fr; gap: 6px; }
+    .corr-bottom-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .tier-pick-group {
+      display: flex;
+      gap: 3px;
+      background: #eef2f7;
+      padding: 2px;
+      border-radius: 7px;
+      flex: 1;
+    }
+    .tier-pick-btn {
+      flex: 1;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--ink-soft);
+      font-size: 10px;
+      font-weight: 750;
+      padding: 4px 2px;
+      border-radius: 5px;
       cursor: pointer;
-      white-space: nowrap;
-      flex-shrink: 0;
       font-family: inherit;
     }
-    .hist-chip:hover { background: #ffffff; }
+    .tier-pick-btn.active {
+      background: #ffffff;
+      color: var(--ink);
+      box-shadow: 0 1px 3px rgba(15, 26, 40, 0.1);
+    }
+    .submit-ingest-btn {
+      appearance: none;
+      border: 0;
+      background: #1f5f4b;
+      color: #ffffff;
+      font-size: 11.2px;
+      font-weight: 720;
+      padding: 5.5px 11px;
+      border-radius: 7px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .submit-ingest-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .tier-mini-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .tier-mini-cell {
+      text-align: center;
+      padding: 3.5px 2px;
+      border-radius: 6px;
+      background: #f4f7fa;
+      border: 1px solid var(--line);
+      font-size: 10px;
+      color: var(--ink-soft);
+    }
+    .tier-mini-cell.active {
+      background: #eef4fb;
+      border-color: rgba(59, 107, 156, 0.45);
+      color: var(--ink);
+      font-weight: 750;
+    }
+    .cand-row {
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 2px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .cand-row:hover { background: #f4f7fb; }
+    .cand-name { font-size: 11px; font-weight: 650; color: var(--ink); }
+    .prob-track { height: 4px; border-radius: 999px; background: #e6ecf3; overflow: hidden; margin-top: 2px; }
+    .prob-fill { height: 100%; border-radius: 999px; background: #5a738e; }
+    .cand-pct { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); }
+    .vlogo { display: inline-grid; place-items: center; flex-shrink: 0; }
   </style>
 </head>
 <body>
   <header class="popup-header">
     <div class="brand">
       <div class="brand-mark">鹈</div>
-      <span class="brand-title">鹈鹕剪贴板鉴定</span>
+      <span class="brand-title">鹈鹕鉴定</span>
       <span class="meta-chip" id="formatChip">就绪</span>
     </div>
     <div class="head-actions">
-      <button class="mini-action-btn" id="btnRefreshPopupClip" type="button" title="强制重新读取当前最新剪贴板">↻ 剪贴板</button>
-      <button class="mini-action-btn" id="btnTogglePaste" type="button">粘贴源码</button>
-      <button class="mini-action-btn" id="btnToggleSettings" type="button" title="连接地址与密钥设置">⚙</button>
+      <button class="mini-btn" id="btnRefreshPopupClip" type="button" title="强制重读当前最新剪贴板">↻</button>
+      <button class="mini-btn" id="btnTogglePaste" type="button">粘贴</button>
+      <button class="mini-btn" id="btnToggleSettings" type="button" title="接口与密钥设置">⚙</button>
     </div>
   </header>
 
-  <div class="source-pill-bar">
-    <div class="pill-group">
-      <button class="source-pill-btn active" data-filter="all" type="button">
-        <span>全部模型</span>
-        <span class="pill-pct" id="pctAll">--</span>
-      </button>
-      <button class="source-pill-btn" data-filter="open" type="button" title="仅筛选开源模型（再次点击恢复全部）">
-        <span>开源</span>
-        <span class="pill-pct" id="pctOpen">--%</span>
-      </button>
-      <button class="source-pill-btn" data-filter="closed" type="button" title="仅筛选闭源商业模型（再次点击恢复全部）">
-        <span>闭源</span>
-        <span class="pill-pct" id="pctClosed">--%</span>
-      </button>
-    </div>
-  </div>
-
   <main class="popup-main">
-    <!-- Manual Paste Drawer -->
+    <!-- 手动粘贴抽屉 -->
     <div class="drawer-box" id="pasteDrawer">
-      <textarea class="code-area" id="manualCodeInput" spellcheck="false" placeholder="在此粘贴 <svg>...</svg> 或 <!DOCTYPE html>... 源码后点击立即鉴定..."></textarea>
+      <textarea class="code-area" id="manualCodeInput" spellcheck="false" placeholder="粘贴 <svg>...</svg> 或 <!DOCTYPE html>... 源码"></textarea>
       <div style="display:flex;justify-content:space-between;gap:6px;">
-        <button class="mini-action-btn" id="btnReadClipNow" type="button">读取系统剪贴板</button>
-        <button class="mini-action-btn primary" id="btnRunManualIdentify" type="button">立即鉴定</button>
+        <button class="mini-btn" id="btnReadClipNow" type="button">读取剪贴板</button>
+        <button class="mini-btn primary" id="btnRunManualIdentify" type="button">立即鉴定</button>
       </div>
     </div>
 
-    <!-- Settings Drawer (Pre-configured with th.629717.cc.cd & 1234567890) -->
+    <!-- 设置抽屉 -->
     <div class="drawer-box" id="settingsDrawer">
-      <div class="cfg-row">
-        <label for="cfgApiBase">识别接口地址（默认固化）</label>
-        <input class="cfg-inp" id="cfgApiBase" type="text" value="https://th.629717.cc.cd" />
+      <div class="cfg-field">
+        <label for="cfgApiBase">识别与入库服务地址</label>
+        <input class="inp-ctrl" id="cfgApiBase" type="text" value="https://th.629717.cc.cd" />
       </div>
-      <div class="cfg-row">
-        <label for="cfgApiKey">访问密码 (X-API-Key，默认 1234567890)</label>
-        <input class="cfg-inp" id="cfgApiKey" type="password" value="1234567890" />
+      <div class="cfg-field">
+        <label for="cfgApiKey">访问密码 (X-API-Key，支持识别+入库)</label>
+        <input class="inp-ctrl" id="cfgApiKey" type="password" value="1234567890" />
       </div>
-      <div class="cfg-row" style="display:flex;align-items:center;justify-content:space-between;">
-        <label for="cfgAutoPopup" style="margin:0;cursor:pointer;">复制 SVG/HTML 时自动在网页弹出预览小窗</label>
+      <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--ink-soft);">
+        <label for="cfgAutoPopup" style="cursor:pointer;">复制代码时自动在网页弹出悬浮面板</label>
         <input id="cfgAutoPopup" type="checkbox" checked />
       </div>
-      <div style="display:flex;justify-content:space-between;gap:6px;margin-top:6px;">
-        <button class="mini-action-btn" id="btnResetCfg" type="button">恢复默认</button>
-        <button class="mini-action-btn primary" id="btnSaveCfg" type="button">保存配置</button>
+      <div style="display:flex;justify-content:space-between;gap:6px;">
+        <button class="mini-btn" id="btnResetCfg" type="button">恢复默认</button>
+        <button class="mini-btn primary" id="btnSaveCfg" type="button">保存配置</button>
       </div>
     </div>
 
-    <!-- Sandbox Live Preview + Model Annotation -->
+    <!-- 纯净实时预览舞台 -->
     <div class="preview-stage-wrap">
+      <div class="svg-fallback-stage" id="popupSvgFallback"></div>
       <iframe id="popupPreviewFrame" title="预览"></iframe>
-      <div class="preview-top-actions">
-        <button class="stage-mini-btn" id="btnSendToPage" type="button" title="在当前网页右下角打开悬浮预览窗">网页悬浮窗 ↗</button>
-      </div>
-      <div class="preview-model-annot" id="annotBar" style="display:none;">
-        <div class="annot-left">
-          <span id="annotLogo"></span>
-          <span class="annot-model-name" id="annotName">--</span>
-        </div>
-        <div class="annot-right">
-          <span class="micro-badge closed" id="annotSrc">--</span>
-          <span class="micro-badge tier" id="annotTier">--</span>
-          <span class="micro-badge conf" id="annotConf">--%</span>
-        </div>
-      </div>
+      <button class="stage-corner-btn" id="btnSendToPage" type="button" title="发送到当前网页右下角悬浮面板">网页悬浮窗 ↗</button>
     </div>
 
-    <!-- Gacha Verdict Card -->
-    <div class="gacha-hero rarity-normal" id="verdictHero">
-      <div class="gacha-top-row">
-        <span class="rarity-pill" id="rarityPill">等待剪贴板 SVG / HTML</span>
-        <div style="display:flex;gap:4px;align-items:center;">
-          <span class="micro-badge closed" id="heroSrcTag" style="display:none;">--</span>
-          <span class="archive-hit-tag" id="confBandTag">就绪</span>
-        </div>
-      </div>
-      <div class="gacha-main-row">
-        <div class="gacha-identity">
-          <div class="gacha-logo-frame" id="heroLogo"></div>
+    <!-- 开源/闭源过滤条 -->
+    <div class="pill-group">
+      <button class="source-pill-btn active" data-filter="all" type="button">
+        <span>全部</span><span class="pill-pct" id="pctAll"></span>
+      </button>
+      <button class="source-pill-btn" data-filter="open" type="button">
+        <span>开源</span><span class="pill-pct" id="pctOpen">--%</span>
+      </button>
+      <button class="source-pill-btn" data-filter="closed" type="button">
+        <span>闭源</span><span class="pill-pct" id="pctClosed">--%</span>
+      </button>
+    </div>
+
+    <!-- 合一精简鉴定结果卡 -->
+    <div class="verdict-card" id="verdictCard">
+      <div class="verdict-main">
+        <div class="verdict-left">
+          <div class="logo-box" id="heroLogo"></div>
           <div style="min-width:0;">
-            <div class="gacha-model-name" id="heroTitle">复制任意 SVG / HTML</div>
-            <div class="gacha-model-sub" id="heroSub">自动检测剪贴板并连接 th.629717.cc.cd 鉴定</div>
+            <div class="model-title" id="heroTitle">复制任意 SVG / HTML</div>
+            <div class="badge-row" id="heroBadges">
+              <span class="tag closed">等待剪贴板源码</span>
+            </div>
           </div>
         </div>
-        <div class="conf-ring-wrap">
-          <svg width="48" height="48" viewBox="0 0 54 54">
-            <circle cx="27" cy="27" r="22" fill="none" stroke="rgba(148,163,184,0.22)" stroke-width="4.5"/>
-            <circle id="confRing" cx="27" cy="27" r="22" fill="none" stroke="#4f6d8a" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="138.2" transform="rotate(-90 27 27)"/>
-          </svg>
-          <span class="conf-ring-pct" id="confPct">--</span>
+        <div class="conf-num" id="confPct">--</div>
+      </div>
+
+      <div class="verdict-actions">
+        <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">✎ 纠正 / 入库</button>
+        <button class="act-btn" id="btnToggleDetails" type="button">详情 ▾</button>
+      </div>
+    </div>
+
+    <div class="toast-inline" id="inlineToast"></div>
+
+    <!-- 纠正 / 归档入库抽屉 -->
+    <div class="drawer-box" id="correctDrawer">
+      <div class="drawer-lbl">
+        <span>点选候选或手动指定真实模型入库</span>
+        <span id="corrModeHint" style="color:#1f5f4b;">归档入库</span>
+      </div>
+      <div class="chip-scroll" id="candidateQuickChips"></div>
+
+      <div class="form-grid-2">
+        <select class="inp-ctrl" id="corrVendorSelect" aria-label="厂商"></select>
+        <input class="inp-ctrl" id="corrModelInput" type="text" placeholder="输入或点选型号，如 opus-5.5" autocomplete="off" />
+      </div>
+
+      <div class="chip-scroll" id="vendorModelChips"></div>
+
+      <div class="corr-bottom-row">
+        <div class="tier-pick-group" id="corrTierGroup">
+          <button type="button" class="tier-pick-btn" data-tier="low">LOW</button>
+          <button type="button" class="tier-pick-btn" data-tier="medium">MED</button>
+          <button type="button" class="tier-pick-btn active" data-tier="high">HIGH</button>
+          <button type="button" class="tier-pick-btn" data-tier="max">MAX</button>
         </div>
-      </div>
-      <div class="filter-notice" id="filterNotice"></div>
-    </div>
-
-    <!-- Effort Gauge -->
-    <div class="vis-block">
-      <div class="vis-head">
-        <span>推理强度档位</span>
-        <span id="effortHeadline" style="color:var(--ink);">--</span>
-      </div>
-      <div class="tier-segments" id="tierGrid"></div>
-    </div>
-
-    <!-- Top-5 Candidates -->
-    <div class="vis-block">
-      <div class="vis-head">
-        <span id="candTitle">模型概率分布</span>
-        <span id="candHint" style="font-weight:500;font-size:10.2px;color:var(--muted);">Top-5 候选</span>
-      </div>
-      <div id="candBars">
-        <div style="font-size:11.2px;color:var(--muted);padding:4px 0;">复制页面上的 SVG 或 HTML 代码后，此处展示 Top-5 细分模型概率。</div>
+        <button type="button" class="submit-ingest-btn" id="btnSubmitIngest">确认入库</button>
       </div>
     </div>
 
-    <!-- Recent Clipboard History -->
-    <div class="vis-block">
-      <div class="vis-head">
-        <span>最近剪贴板鉴定记录</span>
-        <span id="histCount" style="font-size:10.2px;color:var(--muted);">0 条</span>
+    <!-- 按需展开详情抽屉（强度 + Top-5 + 历史记录） -->
+    <div class="drawer-box" id="detailsDrawer">
+      <div class="drawer-lbl">
+        <span>推理强度概率</span>
+        <span id="effortSummaryLbl">--</span>
       </div>
-      <div class="history-strip" id="historyStrip">
-        <span style="font-size:11px;color:var(--muted);">暂无历史记录</span>
+      <div class="tier-mini-bar" id="tierGrid"></div>
+
+      <div class="drawer-lbl" style="margin-top:2px;">
+        <span id="candTitle">Top-5 候选模型</span>
+        <span style="font-weight:500;">点击可带入纠错</span>
       </div>
+      <div id="candBars"></div>
+
+      <div class="drawer-lbl" style="margin-top:2px;">
+        <span>最近记录</span>
+        <span id="histCount">0 条</span>
+      </div>
+      <div class="chip-scroll" id="historyStrip"></div>
     </div>
   </main>
 
