@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>鹈鹕鉴定 · 剪贴板模型鉴定与纠错入库</title>
+  <title>鹈鹕模型鉴定器</title>
   <style>
     :root {
       --ink: #1f2a37;
@@ -15,123 +15,138 @@
       --closed-ink: #384e66;
       --closed-bg: rgba(79, 109, 138, 0.13);
     }
-
-    * { box-sizing: border-box; }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 372px;
-      margin: 0;
-      padding: 0;
-      background: linear-gradient(180deg, #f4f7fb 0%, #eaeff6 100%);
-      color: var(--ink);
+      width: 374px;
+      min-height: 455px;
+      max-height: 600px;
       font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-      line-height: 1.42;
+      color: var(--ink);
+      background: #f3f6fa;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
     }
 
-    .popup-header {
-      padding: 9px 12px;
-      background: rgba(246, 249, 253, 0.92);
+    .topbar {
+      padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.92);
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 6px;
+      gap: 5px;
     }
     .brand { display: flex; align-items: center; gap: 6px; min-width: 0; }
     .brand-mark {
-      width: 24px;
-      height: 24px;
-      border-radius: 7px;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
       background: linear-gradient(145deg, #334354, #51657a);
-      color: #ffffff;
+      color: #fff;
       display: grid;
       place-items: center;
       font-size: 11.5px;
       font-weight: 700;
       flex-shrink: 0;
     }
-    .brand-title { font-size: 13px; font-weight: 760; color: var(--ink); white-space: nowrap; }
+    .brand-title { font-size: 12.2px; font-weight: 750; white-space: nowrap; }
     .meta-chip {
-      font-size: 10px;
+      font-size: 9.8px;
       font-weight: 600;
       color: var(--ink-soft);
-      background: rgba(255, 255, 255, 0.88);
+      background: #f1f5f9;
       border: 1px solid var(--line);
-      padding: 1px 6.5px;
+      padding: 1px 5.5px;
       border-radius: 999px;
+      max-width: 96px;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
-
-    .head-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-    .mini-btn {
+    .top-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .sm-btn {
       appearance: none;
       border: 1px solid var(--line-strong);
-      background: rgba(255, 255, 255, 0.88);
+      background: #ffffff;
+      color: var(--ink);
+      font-size: 10.6px;
+      font-weight: 680;
+      padding: 3.5px 6.5px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    .sm-btn:hover { background: #f8fafc; }
+    .sm-btn.primary { background: #2b3b4e; color: #fff; border-color: #2b3b4e; }
+    .sm-btn.scan { background: #eef4fb; color: #1e4b7a; border-color: rgba(36, 70, 107, 0.3); }
+
+    .nav-tabs {
+      display: flex;
+      padding: 4px 10px 0;
+      gap: 3px;
+      background: rgba(255, 255, 255, 0.65);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-tab {
+      appearance: none;
+      border: 0;
+      background: transparent;
       color: var(--ink-soft);
-      font-size: 10.8px;
-      font-weight: 650;
-      padding: 3.5px 7.5px;
-      border-radius: 6px;
+      font-size: 11.3px;
+      font-weight: 680;
+      padding: 5.5px 10px;
+      border-bottom: 2px solid transparent;
       cursor: pointer;
       font-family: inherit;
     }
-    .mini-btn:hover { background: #ffffff; color: var(--ink); }
-    .mini-btn.primary { background: #2b3b4e; border-color: #2b3b4e; color: #ffffff; }
+    .nav-tab.active { color: var(--ink); border-bottom-color: #2b3b4e; }
 
-    .popup-main {
-      padding: 10px 12px 12px;
-      display: flex;
+    .view {
+      display: none;
+      padding: 9px 11px 11px;
+      overflow-y: auto;
+      flex: 1;
       flex-direction: column;
       gap: 8px;
     }
+    .view.active { display: flex; }
 
-    .drawer-box {
+    .specimens-bar {
       display: none;
-      padding: 9px 10px;
-      border-radius: 11px;
+      gap: 4px;
+      overflow-x: auto;
+      padding-bottom: 1px;
+      scrollbar-width: none;
+    }
+    .specimens-bar.show { display: flex; }
+    .specimens-bar::-webkit-scrollbar { display: none; }
+    .spec-tab {
+      appearance: none;
+      border: 1px solid var(--line-strong);
       background: #ffffff;
-      border: 1px solid var(--line-strong);
-      flex-direction: column;
-      gap: 7px;
-    }
-    .drawer-box.open { display: flex; }
-
-    .code-area {
-      width: 100%;
-      height: 76px;
-      resize: vertical;
+      color: var(--ink-soft);
+      font-size: 10.2px;
+      font-weight: 680;
+      padding: 3px 7.5px;
       border-radius: 7px;
-      border: 1px solid var(--line-strong);
-      padding: 6px 8px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
-      color: var(--ink);
-      outline: none;
-    }
-    .cfg-field label { display: block; font-size: 10.5px; font-weight: 650; color: var(--ink-soft); margin-bottom: 3px; }
-    .inp-ctrl {
-      width: 100%;
-      padding: 5px 7px;
-      border-radius: 7px;
-      border: 1px solid var(--line-strong);
-      background: #f9fbfd;
-      color: var(--ink);
-      font-size: 11.5px;
-      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
       font-family: inherit;
-      outline: none;
+      flex-shrink: 0;
     }
-    .inp-ctrl:focus { border-color: #3b6b9c; background: #ffffff; }
+    .spec-tab.active { background: #24466b; color: #ffffff; border-color: #24466b; }
 
-    /* Unobstructed Preview Stage */
     .preview-stage-wrap {
       position: relative;
-      border-radius: 12px;
+      border-radius: 11px;
       overflow: hidden;
       border: 1px solid var(--line-strong);
       background: #f8fafc;
       aspect-ratio: 16 / 10;
+      flex-shrink: 0;
     }
     .svg-fallback-stage {
       position: absolute;
@@ -165,25 +180,22 @@
       right: 6px;
       z-index: 5;
       appearance: none;
-      border: 1px solid rgba(255, 255, 255, 0.9);
-      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(255,255,255,0.9);
+      background: rgba(255, 255, 255, 0.88);
       backdrop-filter: blur(8px);
       color: var(--ink-soft);
-      font-size: 10.2px;
+      font-size: 10px;
       font-weight: 650;
-      padding: 2.5px 7px;
+      padding: 2.5px 6.5px;
       border-radius: 6px;
       cursor: pointer;
       font-family: inherit;
     }
-    .stage-corner-btn:hover { background: #ffffff; color: var(--ink); }
 
-    /* Compact Filter Strip */
     .pill-group {
       display: flex;
-      align-items: center;
       gap: 2px;
-      background: rgba(220, 228, 238, 0.76);
+      background: rgba(219, 227, 237, 0.72);
       padding: 2.5px;
       border-radius: 9px;
     }
@@ -204,16 +216,11 @@
       gap: 4px;
       font-family: inherit;
     }
-    .source-pill-btn.active {
-      background: #ffffff;
-      color: var(--ink);
-      box-shadow: 0 1px 4px rgba(15, 26, 40, 0.08);
-    }
-    .source-pill-btn.active[data-filter="open"] { background: #226650; color: #ffffff; }
-    .source-pill-btn.active[data-filter="closed"] { background: #364b63; color: #ffffff; }
+    .source-pill-btn.active { background: #fff; color: var(--ink); box-shadow: 0 1px 4px rgba(15,26,40,0.08); }
+    .source-pill-btn.active[data-filter="open"] { background: #226650; color: #fff; }
+    .source-pill-btn.active[data-filter="closed"] { background: #364b63; color: #fff; }
     .pill-pct { font-size: 9.8px; opacity: 0.78; }
 
-    /* Unified Single Verdict Card */
     .verdict-card {
       border-radius: 12px;
       padding: 10px 11px;
@@ -231,9 +238,9 @@
     .verdict-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .verdict-left { display: flex; align-items: center; gap: 9px; min-width: 0; }
     .logo-box {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
+      width: 35px;
+      height: 35px;
+      border-radius: 9px;
       background: #f8fafc;
       border: 1px solid var(--line);
       display: grid;
@@ -241,23 +248,22 @@
       flex-shrink: 0;
     }
     .model-title {
-      font-size: 14.5px;
+      font-size: 14.2px;
       font-weight: 800;
-      color: var(--ink);
-      line-height: 1.2;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .badge-row { display: flex; align-items: center; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
-    .tag { font-size: 9.8px; font-weight: 700; padding: 1px 5.5px; border-radius: 5px; white-space: nowrap; }
+    .badge-row { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+    .tag { font-size: 9.8px; font-weight: 700; padding: 1px 5.5px; border-radius: 5px; }
     .tag.open { background: var(--open-bg); color: var(--open-ink); }
     .tag.closed { background: var(--closed-bg); color: var(--closed-ink); }
-    .tag.tier { background: rgba(31, 42, 55, 0.08); color: var(--ink); }
-    .tag.gold { background: rgba(196, 149, 69, 0.2); color: #7c581c; }
-    .tag.silver { background: rgba(120, 139, 161, 0.2); color: #3d4f63; }
-    .tag.ingested { background: rgba(16, 185, 129, 0.18); color: #0f5c41; }
-    .conf-num { font-size: 18px; font-weight: 850; color: var(--ink); flex-shrink: 0; }
+    .tag.tier { background: rgba(31,42,55,0.08); color: var(--ink); }
+    .tag.gold { background: rgba(196,149,69,0.2); color: #7c581c; }
+    .tag.silver { background: rgba(120,139,161,0.2); color: #3d4f63; }
+    .tag.ingested { background: rgba(16,185,129,0.18); color: #0f5c41; }
+    .tag.kw { background: rgba(245, 158, 11, 0.16); color: #92400e; }
+    .conf-num { font-size: 18px; font-weight: 850; flex-shrink: 0; }
 
     .verdict-actions {
       display: flex;
@@ -275,15 +281,13 @@
       color: var(--ink-soft);
       font-size: 11px;
       font-weight: 680;
-      padding: 4.5px 10px;
+      padding: 4px 10px;
       border-radius: 7px;
       cursor: pointer;
       font-family: inherit;
     }
-    .act-btn:hover { background: #ffffff; color: var(--ink); }
-    .act-btn.active { background: #2b3b4e; color: #ffffff; border-color: #2b3b4e; }
-    .act-btn.correct-btn { color: #1e4b7a; border-color: rgba(43, 76, 111, 0.3); background: rgba(235, 243, 252, 0.65); }
-    .act-btn.correct-btn.active { background: #24466b; color: #ffffff; border-color: #24466b; }
+    .act-btn.correct-btn { color: #1e4b7a; border-color: rgba(43,76,111,0.3); background: rgba(235,243,252,0.65); }
+    .act-btn.active { background: #24466b; color: #fff; border-color: #24466b; }
 
     .toast-inline {
       display: none;
@@ -291,32 +295,26 @@
       font-weight: 650;
       padding: 6px 9px;
       border-radius: 8px;
-      background: rgba(16, 185, 129, 0.13);
-      border: 1px solid rgba(16, 150, 108, 0.3);
+      background: rgba(16,185,129,0.13);
+      border: 1px solid rgba(16,150,108,0.3);
       color: #0f5c41;
     }
-    .toast-inline.err {
-      background: rgba(239, 68, 68, 0.11);
-      border-color: rgba(220, 38, 38, 0.28);
-      color: #991b1b;
-    }
+    .toast-inline.err { background: rgba(239,68,68,0.11); border-color: rgba(220,38,38,0.28); color: #991b1b; }
     .toast-inline.show { display: block; }
 
-    .drawer-lbl {
-      font-size: 10.2px;
-      font-weight: 700;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+    .drawer-card {
+      display: none;
+      border-radius: 11px;
+      padding: 9px 10px;
+      background: #ffffff;
+      border: 1px solid var(--line-strong);
+      flex-direction: column;
+      gap: 7px;
     }
-    .chip-scroll {
-      display: flex;
-      gap: 4px;
-      overflow-x: auto;
-      padding-bottom: 2px;
-      scrollbar-width: none;
-    }
+    .drawer-card.open { display: flex; }
+    .drawer-lbl { font-size: 10.2px; font-weight: 700; color: var(--muted); display: flex; justify-content: space-between; }
+
+    .chip-scroll { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
     .chip-scroll::-webkit-scrollbar { display: none; }
     .quick-chip {
       appearance: none;
@@ -331,23 +329,22 @@
       white-space: nowrap;
       font-family: inherit;
       flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
     }
-    .quick-chip:hover { background: #e8eef5; }
-    .quick-chip.sel { background: #24466b; color: #ffffff; border-color: #24466b; }
-
-    .form-grid-2 { display: grid; grid-template-columns: 106px 1fr; gap: 6px; }
-    .corr-bottom-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-    .tier-pick-group {
-      display: flex;
-      gap: 3px;
-      background: #eef2f7;
-      padding: 2px;
+    .quick-chip.sel { background: #24466b; color: #fff; border-color: #24466b; }
+    .form-grid-2 { display: grid; grid-template-columns: 104px 1fr; gap: 6px; }
+    .inp-ctrl {
+      width: 100%;
+      padding: 5px 7px;
       border-radius: 7px;
-      flex: 1;
+      border: 1px solid var(--line-strong);
+      background: #f9fbfd;
+      color: var(--ink);
+      font-size: 11.3px;
+      font-weight: 650;
+      font-family: inherit;
     }
+    .corr-bottom-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .tier-pick-group { display: flex; gap: 3px; background: #eef2f7; padding: 2px; border-radius: 7px; flex: 1; }
     .tier-pick-btn {
       flex: 1;
       appearance: none;
@@ -359,195 +356,212 @@
       padding: 4px 2px;
       border-radius: 5px;
       cursor: pointer;
-      font-family: inherit;
     }
-    .tier-pick-btn.active {
-      background: #ffffff;
-      color: var(--ink);
-      box-shadow: 0 1px 3px rgba(15, 26, 40, 0.1);
-    }
+    .tier-pick-btn.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(15,26,40,0.1); }
     .submit-ingest-btn {
       appearance: none;
       border: 0;
       background: #1f5f4b;
-      color: #ffffff;
+      color: #fff;
       font-size: 11.2px;
       font-weight: 720;
       padding: 5.5px 11px;
       border-radius: 7px;
       cursor: pointer;
-      white-space: nowrap;
       font-family: inherit;
     }
-    .submit-ingest-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
     .tier-mini-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-    .tier-mini-cell {
-      text-align: center;
-      padding: 3.5px 2px;
-      border-radius: 6px;
-      background: #f4f7fa;
-      border: 1px solid var(--line);
-      font-size: 10px;
-      color: var(--ink-soft);
-    }
-    .tier-mini-cell.active {
-      background: #eef4fb;
-      border-color: rgba(59, 107, 156, 0.45);
-      color: var(--ink);
-      font-weight: 750;
-    }
-    .cand-row {
-      display: grid;
-      grid-template-columns: 18px 1fr auto;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 2px;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .cand-row:hover { background: #f4f7fb; }
-    .cand-name { font-size: 11px; font-weight: 650; color: var(--ink); }
+    .tier-mini-cell { text-align: center; padding: 3.5px 2px; border-radius: 6px; background: #f4f7fa; border: 1px solid var(--line); font-size: 10px; color: var(--ink-soft); }
+    .tier-mini-cell.active { background: #eef4fb; border-color: rgba(59,107,156,0.45); color: var(--ink); font-weight: 750; }
+    .cand-row { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 6px; padding: 3px 2px; cursor: pointer; }
+    .cand-name { font-size: 11px; font-weight: 650; }
     .prob-track { height: 4px; border-radius: 999px; background: #e6ecf3; overflow: hidden; margin-top: 2px; }
     .prob-fill { height: 100%; border-radius: 999px; background: #5a738e; }
     .cand-pct { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); }
-    .vlogo { display: inline-grid; place-items: center; flex-shrink: 0; }
+    .vlogo { display: inline-grid; place-items: center; }
+
+    .empty-box {
+      padding: 30px 14px;
+      text-align: center;
+      color: var(--ink-soft);
+      font-size: 12px;
+      line-height: 1.6;
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1px dashed var(--line-strong);
+    }
+
+    textarea.paste-box {
+      width: 100%;
+      height: 170px;
+      resize: vertical;
+      border-radius: 10px;
+      border: 1px solid var(--line-strong);
+      padding: 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11.2px;
+      background: #fff;
+      color: var(--ink);
+    }
+    .field { margin-bottom: 9px; }
+    .field label { display: block; font-size: 11.2px; font-weight: 680; margin-bottom: 4px; color: var(--ink); }
+    .field input[type="text"], .field input[type="password"], .field textarea {
+      width: 100%;
+      padding: 6.5px 9px;
+      border-radius: 8px;
+      border: 1px solid var(--line-strong);
+      font-size: 11.8px;
+      background: #fff;
+      font-family: inherit;
+    }
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: #fff;
+      border-radius: 9px;
+      border: 1px solid var(--line);
+      margin-bottom: 7px;
+      font-size: 11.6px;
+    }
   </style>
 </head>
 <body>
-  <header class="popup-header">
+  <div class="topbar">
     <div class="brand">
       <div class="brand-mark">鹈</div>
-      <span class="brand-title">鹈鹕鉴定</span>
-      <span class="meta-chip" id="formatChip">就绪</span>
+      <div class="brand-title">鹈鹕鉴定</div>
+      <span class="meta-chip" id="statusSub">就绪</span>
     </div>
-    <div class="head-actions">
-      <button class="mini-btn" id="btnRefreshPopupClip" type="button" title="强制重读当前最新剪贴板">↻</button>
-      <button class="mini-btn" id="btnTogglePaste" type="button">粘贴</button>
-      <button class="mini-btn" id="btnToggleSettings" type="button" title="接口与密钥设置">⚙</button>
+    <div class="top-actions">
+      <button class="sm-btn scan" id="btnScanTab" type="button" title="扫描当前标签页中的 SVG / HTML 代码">🔍 抓本页</button>
+      <button class="sm-btn primary" id="btnCheckClip" type="button">📋 剪贴板</button>
     </div>
-  </header>
+  </div>
 
-  <main class="popup-main">
-    <!-- 手动粘贴抽屉 -->
-    <div class="drawer-box" id="pasteDrawer">
-      <textarea class="code-area" id="manualCodeInput" spellcheck="false" placeholder="粘贴 <svg>...</svg> 或 <!DOCTYPE html>... 源码"></textarea>
-      <div style="display:flex;justify-content:space-between;gap:6px;">
-        <button class="mini-btn" id="btnReadClipNow" type="button">读取剪贴板</button>
-        <button class="mini-btn primary" id="btnRunManualIdentify" type="button">立即鉴定</button>
-      </div>
-    </div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-tab="result" type="button">鉴定与入库</button>
+    <button class="nav-tab" data-tab="paste" type="button">手动粘贴</button>
+    <button class="nav-tab" data-tab="settings" type="button">⚙ 设置</button>
+  </div>
 
-    <!-- 设置抽屉 -->
-    <div class="drawer-box" id="settingsDrawer">
-      <div class="cfg-field">
-        <label for="cfgApiBase">识别与入库服务地址</label>
-        <input class="inp-ctrl" id="cfgApiBase" type="text" value="https://th.629717.cc.cd" />
-      </div>
-      <div class="cfg-field">
-        <label for="cfgApiKey">访问密码 (X-API-Key，支持识别+入库)</label>
-        <input class="inp-ctrl" id="cfgApiKey" type="password" value="1234567890" />
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--ink-soft);">
-        <label for="cfgAutoPopup" style="cursor:pointer;">复制代码时自动在网页弹出悬浮面板</label>
-        <input id="cfgAutoPopup" type="checkbox" checked />
-      </div>
-      <div style="display:flex;justify-content:space-between;gap:6px;">
-        <button class="mini-btn" id="btnResetCfg" type="button">恢复默认</button>
-        <button class="mini-btn primary" id="btnSaveCfg" type="button">保存配置</button>
-      </div>
+  <!-- Tab 1: Result -->
+  <div class="view active" id="view-result">
+    <div id="emptyState" class="empty-box">
+      打开含有鹈鹕单车等特征代码的网页将自动捕获；<br/>
+      也可点击右上角 <strong>🔍 抓本页</strong> 或 <strong>📋 剪贴板</strong> 立即鉴定。
     </div>
 
-    <!-- 纯净实时预览舞台 -->
-    <div class="preview-stage-wrap">
-      <div class="svg-fallback-stage" id="popupSvgFallback"></div>
-      <iframe id="popupPreviewFrame" title="预览"></iframe>
-      <button class="stage-corner-btn" id="btnSendToPage" type="button" title="发送到当前网页右下角悬浮面板">网页悬浮窗 ↗</button>
-    </div>
+    <div id="resultContent" style="display:none;flex-direction:column;gap:8px;">
+      <div class="specimens-bar" id="pageSpecimensBar"></div>
 
-    <!-- 开源/闭源过滤条 -->
-    <div class="pill-group">
-      <button class="source-pill-btn active" data-filter="all" type="button">
-        <span>全部</span><span class="pill-pct" id="pctAll"></span>
-      </button>
-      <button class="source-pill-btn" data-filter="open" type="button">
-        <span>开源</span><span class="pill-pct" id="pctOpen">--%</span>
-      </button>
-      <button class="source-pill-btn" data-filter="closed" type="button">
-        <span>闭源</span><span class="pill-pct" id="pctClosed">--%</span>
-      </button>
-    </div>
+      <div class="preview-stage-wrap">
+        <div class="svg-fallback-stage" id="svgFallbackStage"></div>
+        <iframe id="popupPreviewFrame" title="预览"></iframe>
+        <button class="stage-corner-btn" id="btnPopInTab" type="button">⤢ 网页浮窗</button>
+      </div>
 
-    <!-- 合一精简鉴定结果卡 -->
-    <div class="verdict-card" id="verdictCard">
-      <div class="verdict-main">
-        <div class="verdict-left">
-          <div class="logo-box" id="heroLogo"></div>
-          <div style="min-width:0;">
-            <div class="model-title" id="heroTitle">复制任意 SVG / HTML</div>
-            <div class="badge-row" id="heroBadges">
-              <span class="tag closed">等待剪贴板源码</span>
+      <div class="pill-group">
+        <button class="source-pill-btn active" data-filter="all" type="button"><span>全部</span><span class="pill-pct" id="pctAll"></span></button>
+        <button class="source-pill-btn" data-filter="open" type="button"><span>开源</span><span class="pill-pct" id="pctOpen">--%</span></button>
+        <button class="source-pill-btn" data-filter="closed" type="button"><span>闭源</span><span class="pill-pct" id="pctClosed">--%</span></button>
+      </div>
+
+      <div class="verdict-card" id="verdictCard">
+        <div class="verdict-main">
+          <div class="verdict-left">
+            <div class="logo-box" id="heroLogo"></div>
+            <div style="min-width:0;">
+              <div class="model-title" id="heroTitle">--</div>
+              <div class="badge-row" id="heroBadges"></div>
             </div>
           </div>
+          <div class="conf-num" id="confPct">--%</div>
         </div>
-        <div class="conf-num" id="confPct">--</div>
-      </div>
-
-      <div class="verdict-actions">
-        <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">✎ 纠正 / 入库</button>
-        <button class="act-btn" id="btnToggleDetails" type="button">详情 ▾</button>
-      </div>
-    </div>
-
-    <div class="toast-inline" id="inlineToast"></div>
-
-    <!-- 纠正 / 归档入库抽屉 -->
-    <div class="drawer-box" id="correctDrawer">
-      <div class="drawer-lbl">
-        <span>点选候选或手动指定真实模型入库</span>
-        <span id="corrModeHint" style="color:#1f5f4b;">归档入库</span>
-      </div>
-      <div class="chip-scroll" id="candidateQuickChips"></div>
-
-      <div class="form-grid-2">
-        <select class="inp-ctrl" id="corrVendorSelect" aria-label="厂商"></select>
-        <input class="inp-ctrl" id="corrModelInput" type="text" placeholder="输入或点选型号，如 opus-5.5" autocomplete="off" />
-      </div>
-
-      <div class="chip-scroll" id="vendorModelChips"></div>
-
-      <div class="corr-bottom-row">
-        <div class="tier-pick-group" id="corrTierGroup">
-          <button type="button" class="tier-pick-btn" data-tier="low">LOW</button>
-          <button type="button" class="tier-pick-btn" data-tier="medium">MED</button>
-          <button type="button" class="tier-pick-btn active" data-tier="high">HIGH</button>
-          <button type="button" class="tier-pick-btn" data-tier="max">MAX</button>
+        <div class="verdict-actions">
+          <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">✎ 纠正 / 入库</button>
+          <button class="act-btn" id="btnToggleDetails" type="button">详情 ▾</button>
         </div>
-        <button type="button" class="submit-ingest-btn" id="btnSubmitIngest">确认入库</button>
+      </div>
+
+      <div class="toast-inline" id="inlineToast"></div>
+
+      <div class="drawer-card" id="correctDrawer">
+        <div class="drawer-lbl">
+          <span>点选候选或指定真实模型入库</span>
+          <span id="corrModeHint" style="color:#1f5f4b;">归档入库</span>
+        </div>
+        <div class="chip-scroll" id="candidateQuickChips"></div>
+        <div class="form-grid-2">
+          <select class="inp-ctrl" id="corrVendorSelect"></select>
+          <input class="inp-ctrl" id="corrModelInput" type="text" placeholder="型号，如 opus-5.5" />
+        </div>
+        <div class="chip-scroll" id="vendorModelChips"></div>
+        <div class="corr-bottom-row">
+          <div class="tier-pick-group" id="corrTierGroup">
+            <button type="button" class="tier-pick-btn" data-tier="low">LOW</button>
+            <button type="button" class="tier-pick-btn" data-tier="medium">MED</button>
+            <button type="button" class="tier-pick-btn active" data-tier="high">HIGH</button>
+            <button type="button" class="tier-pick-btn" data-tier="max">MAX</button>
+          </div>
+          <button type="button" class="submit-ingest-btn" id="btnSubmitIngest">确认入库</button>
+        </div>
+      </div>
+
+      <div class="drawer-card" id="detailsDrawer">
+        <div class="drawer-lbl"><span>推理强度分布</span><span id="effortSummaryLbl">--</span></div>
+        <div class="tier-mini-bar" id="tierGrid"></div>
+        <div class="drawer-lbl" style="margin-top:3px;"><span id="candTitle">Top-5 候选</span><span>点击填入纠错</span></div>
+        <div id="candBars"></div>
       </div>
     </div>
+  </div>
 
-    <!-- 按需展开详情抽屉（强度 + Top-5 + 历史记录） -->
-    <div class="drawer-box" id="detailsDrawer">
-      <div class="drawer-lbl">
-        <span>推理强度概率</span>
-        <span id="effortSummaryLbl">--</span>
-      </div>
-      <div class="tier-mini-bar" id="tierGrid"></div>
-
-      <div class="drawer-lbl" style="margin-top:2px;">
-        <span id="candTitle">Top-5 候选模型</span>
-        <span style="font-weight:500;">点击可带入纠错</span>
-      </div>
-      <div id="candBars"></div>
-
-      <div class="drawer-lbl" style="margin-top:2px;">
-        <span>最近记录</span>
-        <span id="histCount">0 条</span>
-      </div>
-      <div class="chip-scroll" id="historyStrip"></div>
+  <!-- Tab 2: Paste -->
+  <div class="view" id="view-paste">
+    <textarea class="paste-box" id="pasteInput" placeholder="在此粘贴 <!DOCTYPE html>... 或 <svg ...>...</svg> 源码..."></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:6px;">
+      <button class="sm-btn" id="btnClearPaste" type="button">清空</button>
+      <button class="sm-btn primary" id="btnRunPaste" type="button">立即渲染并鉴定</button>
     </div>
-  </main>
+  </div>
+
+  <!-- Tab 3: Settings -->
+  <div class="view" id="view-settings">
+    <div class="switch-row">
+      <span><strong>自动捕获网页 SVG/HTML 代码</strong></span>
+      <input type="checkbox" id="cfgAutoPageCapture" checked />
+    </div>
+    <div class="switch-row">
+      <span>自动弹出仅限命中<strong>关键词特征</strong></span>
+      <input type="checkbox" id="cfgKeywordOnlyAuto" checked />
+    </div>
+    <div class="switch-row">
+      <span>复制代码时自动弹出网页鉴定窗</span>
+      <input type="checkbox" id="cfgAutoPopup" checked />
+    </div>
+    <div class="field">
+      <label style="display:flex;justify-content:space-between;align-items:center;">
+        <span>关键词特征词库（逗号分隔，中英文大小写不敏感）</span>
+        <button class="quick-chip" id="btnResetDefaultKws" type="button">恢复默认</button>
+      </label>
+      <textarea id="cfgCaptureKeywords" rows="3" spellcheck="false"></textarea>
+    </div>
+    <div class="field">
+      <label>后端服务地址 (API Base)</label>
+      <input type="text" id="cfgApiBase" placeholder="https://th.629717.cc.cd" />
+    </div>
+    <div class="field">
+      <label>访问与入库密钥 (API Key)</label>
+      <input type="password" id="cfgApiKey" placeholder="1234567890" />
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <button class="sm-btn primary" id="btnSaveCfg" type="button">保存设置</button>
+      <span id="saveToast" style="font-size:11.5px;color:#1c624c;"></span>
+    </div>
+  </div>
 
   <script src="shared.js"></script>
   <script src="popup.js"></script>

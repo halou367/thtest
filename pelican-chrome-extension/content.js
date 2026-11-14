@@ -4,12 +4,15 @@
   window.__pelicanContentScriptLoaded = true;
 
   const {
+    DEFAULT_CAPTURE_KEYWORDS,
     TIER_ORDER,
     TIER_SHORT,
     SHORT_VENDOR_CATALOG,
     escapeHtml,
     fastHash,
     extractRenderableCode,
+    isCompleteSpecimenCode,
+    matchKeywordFeatures,
     extractSanitizedSvgMarkup,
     splitToShortVendorAndModel,
     getModelsForVendor,
@@ -20,7 +23,7 @@
   let hostEl = null;
   let shadow = null;
 
-  // Monotonic counters to prevent stale async responses or duplicate renders
+  // Monotonic counters
   let renderSeq = 0;
   let identifySeq = 0;
   let gestureSeq = 0;
@@ -32,17 +35,35 @@
   const ackedRenderIds = new Set();
   const activeTimers = new Map();
 
+  // Page Auto-Capture state
+  let activeConfig = {
+    autoPopup: true,
+    autoPageCapture: true,
+    keywordOnlyAuto: true,
+    captureKeywords: DEFAULT_CAPTURE_KEYWORDS,
+    sourceFilter: "all"
+  };
+  const autoCapturedPageHashes = new Set();
+  const subframeSpecimensMap = new Map();
+  let lastObservedHref = location.href;
+  let domSettleTimer = null;
+  let lastMutationBurstTs = 0;
+
   const uiState = {
     visible: false,
     minimized: false,
     detailsOpen: false,
     correctOpen: false,
+    kwDrawerOpen: false,
     submittingSample: false,
     sourceFilter: "all",
     currentCode: "",
     currentHash: "",
     currentType: "SVG",
+    currentOrigin: "",
+    currentMatchedKws: [],
     currentVerdict: null,
+    pageSpecimens: [],
     corrVendor: "Claude",
     corrModel: "opus-5.5",
     corrTier: "high",
@@ -51,10 +72,23 @@
     detectedTier: "high"
   };
 
-  // Global listener for sandbox render ACKs
+  // Load initial config early for background page auto-capture
+  (async function bootstrapConfig() {
+    try {
+      const st = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      if (st && st.config) {
+        activeConfig = { ...activeConfig, ...st.config };
+        uiState.sourceFilter = activeConfig.sourceFilter || "all";
+      }
+    } catch (_) {}
+    schedulePageAutoCapture(650);
+  })();
+
+  // Global listener for sandbox render ACKs & Subframe Specimens
   window.addEventListener("message", (ev) => {
     const d = ev && ev.data;
     if (!d || typeof d !== "object") return;
+
     if (d.type === "PELICAN_RENDER_ACK" && d.renderId) {
       ackedRenderIds.add(d.renderId);
       const timer = activeTimers.get(d.renderId);
@@ -68,8 +102,281 @@
         if (frame) frame.style.opacity = "1";
         if (fb) fb.style.display = "none";
       }
+      return;
+    }
+
+    if (d.source === "__PELICAN_SUBFRAME_SPECIMENS__" && Array.isArray(d.items)) {
+      let addedNew = false;
+      d.items.forEach((it) => {
+        if (!it || !it.code) return;
+        const parsed = extractRenderableCode(it.code);
+        if (!parsed) return;
+        const h = fastHash(parsed.code);
+        if (!subframeSpecimensMap.has(h)) addedNew = true;
+        subframeSpecimensMap.set(h, {
+          hash: h,
+          type: parsed.type,
+          code: parsed.code,
+          origin: it.origin || "子帧预览"
+        });
+      });
+      if (addedNew && !d.manualScan) {
+        schedulePageAutoCapture(300);
+      }
     }
   });
+
+  function pingSubframesForSpecimens() {
+    try {
+      const frames = document.querySelectorAll("iframe");
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i];
+        if (hostEl && hostEl.contains(f)) continue;
+        try {
+          if (f.contentWindow) {
+            f.contentWindow.postMessage({ source: "__PELICAN_SCAN_SUBFRAMES_REQ__" }, "*");
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  function isStandaloneIllustrationSvg(svgEl) {
+    if (!svgEl || (hostEl && hostEl.contains(svgEl))) return false;
+    if (svgEl.closest("button, a, nav, header, footer, [role='button'], [aria-hidden='true']")) {
+      return false;
+    }
+    const cls = String(svgEl.getAttribute("class") || "").toLowerCase();
+    if (/\b(lucide|feather|heroicon|octicon|fa-|icon|avatar|logo|spinner)\b/.test(cls)) {
+      return false;
+    }
+    const shapes = svgEl.querySelectorAll("path,circle,ellipse,rect,line,polygon,polyline").length;
+    if (shapes < 8) return false;
+
+    let w = 0, h = 0;
+    try {
+      const rect = svgEl.getBoundingClientRect();
+      w = rect.width;
+      h = rect.height;
+    } catch (_) {}
+
+    if (w < 140 || h < 100) {
+      const vb = (svgEl.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+      if (vb.length === 4 && vb[2] >= 160 && vb[3] >= 110 && w === 0 && h === 0) {
+        // Offscreen / hidden tab content SVG with full illustration viewBox
+      } else {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // Scan the current DOM + iframes + code blocks for SVG / HTML specimens and score by keyword features
+  function scanPageSpecimens(opts = {}) {
+    const requireComplete = Boolean(opts.requireComplete);
+    const rawCandidates = [];
+
+    // 1. iframe[srcdoc] & accessible blob/about preview iframes (Arena / Claude / DeepSeek preview panes!)
+    const iframes = document.querySelectorAll("iframe");
+    for (let i = 0; i < iframes.length; i++) {
+      const f = iframes[i];
+      if (hostEl && hostEl.contains(f)) continue;
+      const srcdoc = f.getAttribute("srcdoc");
+      if (srcdoc && srcdoc.length >= 60) {
+        const parsed = extractRenderableCode(srcdoc);
+        if (parsed && (!requireComplete || isCompleteSpecimenCode(parsed))) {
+          rawCandidates.push({ type: parsed.type, code: parsed.code, origin: "预览框" });
+        }
+        continue;
+      }
+      const fSrc = String(f.getAttribute("src") || "");
+      if (!fSrc || fSrc.startsWith("about:") || fSrc.startsWith("blob:")) {
+        try {
+          const doc = f.contentDocument;
+          if (doc && doc.documentElement) {
+            const innerSvgs = doc.querySelectorAll("svg");
+            const innerCanvas = doc.querySelectorAll("canvas");
+            if (innerSvgs.length > 0 || innerCanvas.length > 0) {
+              const htmlStr = "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
+              if (!htmlStr.includes("__tihu_fit_css")) {
+                const parsed = extractRenderableCode(htmlStr);
+                if (parsed && (!requireComplete || isCompleteSpecimenCode(parsed))) {
+                  rawCandidates.push({ type: parsed.type, code: parsed.code, origin: "内嵌帧" });
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 2. Code blocks & editors (Markdown <pre><code>, CodeMirror .cm-content, <textarea>)
+    const codeEls = document.querySelectorAll("pre code, pre, .cm-content, textarea");
+    const visitedPre = new Set();
+    for (let i = 0; i < codeEls.length; i++) {
+      const el = codeEls[i];
+      if (hostEl && hostEl.contains(el)) continue;
+      if (el.tagName === "PRE" && visitedPre.has(el)) continue;
+      if (el.tagName === "CODE" && el.parentElement && el.parentElement.tagName === "PRE") {
+        visitedPre.add(el.parentElement);
+      }
+
+      const txt = typeof el.value === "string" ? el.value : el.textContent || "";
+      if (txt.length < 60 || txt.length > 3200000) continue;
+      if (!/<svg[\s>]|<!doctype\s+html|<html[\s>]|<(canvas|style)[\s>]/i.test(txt)) continue;
+
+      const parsed = extractRenderableCode(txt);
+      if (parsed && (!requireComplete || isCompleteSpecimenCode(parsed))) {
+        rawCandidates.push({ type: parsed.type, code: parsed.code, origin: "代码块" });
+      }
+    }
+
+    // 3. Subframe reported specimens (cross-origin sandbox preview frames)
+    for (const item of subframeSpecimensMap.values()) {
+      rawCandidates.push({ type: item.type, code: item.code, origin: item.origin });
+    }
+
+    // 4. Standalone rendered <svg> illustrations in page DOM
+    const svgs = document.querySelectorAll("svg");
+    for (let i = 0; i < svgs.length; i++) {
+      const s = svgs[i];
+      if (!isStandaloneIllustrationSvg(s)) continue;
+      let markup = s.outerHTML || "";
+      if (markup.length < 260 || markup.length > 2500000) continue;
+      if (!/\bxmlns\s*=/i.test(markup)) {
+        markup = markup.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+      rawCandidates.push({ type: "SVG", code: markup, origin: "页面SVG" });
+    }
+
+    // Deduplicate by exact hash AND suppress standalone SVG if already embedded inside a captured full HTML
+    const byHash = new Map();
+    const htmlCodes = [];
+    for (let i = 0; i < rawCandidates.length; i++) {
+      const c = rawCandidates[i];
+      const h = fastHash(c.code);
+      if (byHash.has(h)) continue;
+      if (c.type === "HTML") htmlCodes.push(c.code);
+      const kw = matchKeywordFeatures(c.code, activeConfig.captureKeywords);
+      byHash.set(h, {
+        hash: h,
+        type: c.type,
+        code: c.code,
+        origin: c.origin,
+        kwHit: kw.hit,
+        matchedKws: kw.matched,
+        shapeCount: kw.shapeCount,
+        score: kw.score + (c.type === "HTML" ? 15 : 0)
+      });
+    }
+
+    const deduped = [];
+    for (const item of byHash.values()) {
+      if (item.type === "SVG" && htmlCodes.length > 0) {
+        const core = item.code.replace(/\s+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/i, "").slice(0, 180);
+        const insideHtml = htmlCodes.some((hc) => hc.includes(item.code) || (core.length > 60 && hc.includes(core)));
+        if (insideHtml) continue;
+      }
+      deduped.push(item);
+    }
+
+    // Sort: keyword-matched specimens FIRST, then by keyword score & size
+    deduped.sort((a, b) => {
+      if (a.kwHit !== b.kwHit) return a.kwHit ? -1 : 1;
+      if (b.score !== a.score) return b.score - a.score;
+      return b.code.length - a.code.length;
+    });
+
+    return deduped.slice(0, 12);
+  }
+
+  function schedulePageAutoCapture(delayMs = 950) {
+    if (!activeConfig.autoPageCapture) return;
+    if (location.href !== lastObservedHref) {
+      lastObservedHref = location.href;
+      autoCapturedPageHashes.clear();
+      subframeSpecimensMap.clear();
+    }
+    if (domSettleTimer) clearTimeout(domSettleTimer);
+    domSettleTimer = setTimeout(() => {
+      runAutoPageCaptureCheck();
+    }, delayMs);
+  }
+
+  function runAutoPageCaptureCheck() {
+    if (!activeConfig.autoPageCapture) return;
+    const allFound = scanPageSpecimens({ requireComplete: true });
+    if (!allFound.length) return;
+
+    const eligible = activeConfig.keywordOnlyAuto
+      ? allFound.filter((x) => x.kwHit)
+      : allFound.filter((x) => x.kwHit || x.origin !== "页面SVG" || x.shapeCount >= 14);
+
+    if (!eligible.length) {
+      // Still update header badge count quietly if UI already exists
+      if (shadow) {
+        uiState.pageSpecimens = allFound;
+        renderPageSpecimensBar();
+      }
+      return;
+    }
+
+    const unseen = eligible.filter((x) => !autoCapturedPageHashes.has(x.hash));
+    if (!unseen.length) {
+      if (shadow) {
+        uiState.pageSpecimens = allFound;
+        renderPageSpecimensBar();
+      }
+      return;
+    }
+
+    unseen.forEach((x) => autoCapturedPageHashes.add(x.hash));
+    uiState.pageSpecimens = allFound;
+
+    const chosen = unseen[0];
+    showWindowAndIdentify(chosen.code, {
+      autoTriggered: true,
+      forceRefresh: true,
+      originLabel: chosen.origin,
+      matchedKws: chosen.matchedKws
+    });
+  }
+
+  // Throttled MutationObserver watching page for newly generated/streamed SVG & HTML
+  if (typeof MutationObserver !== "undefined") {
+    const startObserver = () => {
+      const rootTarget = document.body || document.documentElement;
+      if (!rootTarget) return;
+      const obs = new MutationObserver((mutations) => {
+        if (!activeConfig.autoPageCapture) return;
+        // Ignore mutations exclusively inside our own extension host
+        let externalChange = false;
+        for (let i = 0; i < mutations.length; i++) {
+          const t = mutations[i].target;
+          if (!hostEl || (t !== hostEl && !hostEl.contains(t))) {
+            externalChange = true;
+            break;
+          }
+        }
+        if (!externalChange) return;
+
+        const now = Date.now();
+        if (now - lastMutationBurstTs < 220 && domSettleTimer) {
+          // Reset settle timer during active LLM token streaming so we capture once streaming finishes!
+          clearTimeout(domSettleTimer);
+          domSettleTimer = setTimeout(runAutoPageCaptureCheck, 950);
+          return;
+        }
+        lastMutationBurstTs = now;
+        schedulePageAutoCapture(950);
+      });
+      obs.observe(rootTarget, { childList: true, subtree: true, characterData: true });
+    };
+
+    if (document.body) startObserver();
+    else window.addEventListener("DOMContentLoaded", startObserver);
+  }
 
   function deliverToSandbox(frameId, cid, code) {
     if (!shadow) return;
@@ -83,7 +390,6 @@
       }
     }
 
-    // Mount instant zero-flash Shadow-DOM SVG layer (also acts as CSP fallback if host page blocks iframes)
     if (cid === "preview") {
       const fb = shadow.getElementById("svgFallbackStage");
       const safeSvg = extractSanitizedSvgMarkup(code);
@@ -147,7 +453,6 @@
       --muted: #7c8b9c;
       --line: rgba(100, 116, 139, 0.16);
       --line-strong: rgba(100, 116, 139, 0.26);
-      --accent: #2b4c6f;
       --open-ink: #1c624c;
       --open-bg: rgba(16, 185, 129, 0.14);
       --closed-ink: #384e66;
@@ -178,13 +483,13 @@
     .ext-window.show { display: flex; }
 
     .ext-header {
-      padding: 8px 11px;
-      background: rgba(241, 245, 250, 0.9);
+      padding: 8px 10px;
+      background: rgba(241, 245, 250, 0.92);
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 6px;
+      gap: 5px;
       cursor: grab;
       user-select: none;
       flex-shrink: 0;
@@ -204,44 +509,94 @@
       font-weight: 700;
       flex-shrink: 0;
     }
-    .win-title { font-size: 12.5px; font-weight: 750; color: var(--ink); white-space: nowrap; }
+    .win-title { font-size: 12.2px; font-weight: 750; color: var(--ink); white-space: nowrap; }
     .meta-chip {
-      font-size: 10px;
+      font-size: 9.8px;
       font-weight: 600;
       color: var(--ink-soft);
       background: rgba(255, 255, 255, 0.85);
       border: 1px solid var(--line);
-      padding: 1px 6px;
+      padding: 1px 5.5px;
       border-radius: 999px;
       white-space: nowrap;
+      max-width: 112px;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .win-controls { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
-    .elapsed-lbl { font-size: 10px; color: var(--muted); margin-right: 3px; white-space: nowrap; }
+    .elapsed-lbl { font-size: 9.8px; color: var(--muted); margin-right: 2px; white-space: nowrap; }
+    .head-pill-btn {
+      appearance: none;
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--ink);
+      font-size: 10.2px;
+      font-weight: 700;
+      padding: 2px 6.5px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    .head-pill-btn:hover { background: #ffffff; border-color: #64748b; }
+    .head-pill-btn.active { background: #24466b; color: #ffffff; border-color: #24466b; }
     .icon-btn {
       appearance: none;
       border: 0;
       background: transparent;
       color: var(--ink-soft);
-      width: 23px;
-      height: 23px;
+      width: 22px;
+      height: 22px;
       border-radius: 6px;
       display: grid;
       place-items: center;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12.5px;
       padding: 0;
       transition: background 0.14s ease, color 0.14s ease;
     }
     .icon-btn:hover { background: rgba(100, 116, 139, 0.14); color: var(--ink); }
+    .icon-btn.active { background: rgba(36, 70, 107, 0.14); color: #1e40af; }
 
     .scroll-body {
-      padding: 10px 11px 11px;
+      padding: 9px 11px 11px;
       overflow-y: auto;
       scrollbar-width: thin;
       display: flex;
       flex-direction: column;
       gap: 8px;
+    }
+
+    /* Multi-Specimen Page Switcher Bar (Hidden when <= 1 specimen) */
+    .specimens-bar {
+      display: none;
+      gap: 4px;
+      overflow-x: auto;
+      padding-bottom: 1px;
+      scrollbar-width: none;
+    }
+    .specimens-bar.show { display: flex; }
+    .specimens-bar::-webkit-scrollbar { display: none; }
+    .spec-tab {
+      appearance: none;
+      border: 1px solid var(--line-strong);
+      background: #ffffff;
+      color: var(--ink-soft);
+      font-size: 10.2px;
+      font-weight: 680;
+      padding: 3px 7.5px;
+      border-radius: 7px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+    .spec-tab:hover { color: var(--ink); border-color: #64748b; }
+    .spec-tab.active {
+      background: #24466b;
+      color: #ffffff;
+      border-color: #24466b;
     }
 
     /* Clean Unobstructed Live Preview Stage */
@@ -343,7 +698,7 @@
     .source-pill-btn.active[data-filter="closed"] { background: #364b63; color: #ffffff; }
     .pill-pct { font-size: 9.8px; opacity: 0.78; }
 
-    /* Unified Single Verdict Card (Zero Redundancy) */
+    /* Unified Single Verdict Card */
     .verdict-card {
       border-radius: 12px;
       padding: 10px 11px;
@@ -411,6 +766,7 @@
     .tag.gold { background: rgba(196, 149, 69, 0.2); color: #7c581c; }
     .tag.silver { background: rgba(120, 139, 161, 0.2); color: #3d4f63; }
     .tag.ingested { background: rgba(16, 185, 129, 0.18); color: #0f5c41; }
+    .tag.kw { background: rgba(245, 158, 11, 0.16); color: #92400e; }
 
     .conf-num {
       font-size: 18px;
@@ -468,7 +824,6 @@
     }
     .toast-inline.show { display: block; }
 
-    /* Inline Correction & Archive Drawer */
     .drawer-card {
       display: none;
       border-radius: 11px;
@@ -525,12 +880,33 @@
       border: 1px solid var(--line-strong);
       background: #f9fbfd;
       color: var(--ink);
-      font-size: 11.5px;
+      font-size: 11.3px;
       font-weight: 650;
       font-family: inherit;
       outline: none;
     }
     .inp-ctrl:focus { border-color: #3b6b9c; background: #ffffff; }
+    .kw-textarea {
+      width: 100%;
+      height: 50px;
+      resize: vertical;
+      padding: 5px 7px;
+      border-radius: 7px;
+      border: 1px solid var(--line-strong);
+      background: #f9fbfd;
+      color: var(--ink);
+      font-size: 10.8px;
+      line-height: 1.4;
+      font-family: inherit;
+      outline: none;
+    }
+    .chk-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10.8px;
+      color: var(--ink-soft);
+    }
 
     .corr-bottom-row {
       display: flex;
@@ -581,7 +957,6 @@
     .submit-ingest-btn:hover { opacity: 0.92; }
     .submit-ingest-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-    /* Collapsible Details Drawer (Top-5 + Tiers) */
     .tier-mini-bar {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -707,6 +1082,8 @@
             </div>
             <div class="win-controls">
               <span class="elapsed-lbl" id="elapsedLbl"></span>
+              <button class="head-pill-btn" id="btnScanPage" type="button" title="自动扫描并捕获本页全部 SVG / HTML 代码（关键词特征优先）">🔍 本页</button>
+              <button class="icon-btn" id="btnToggleKwCfg" type="button" title="页面自动捕获与关键词特征设置">🎯</button>
               <button class="icon-btn" id="btnRefreshClip" type="button" title="强制重读系统剪贴板并刷新">↻</button>
               <button class="icon-btn" id="btnMinimize" type="button" title="最小化">—</button>
               <button class="icon-btn" id="btnClose" type="button" title="关闭">×</button>
@@ -714,6 +1091,29 @@
           </div>
 
           <div class="scroll-body">
+            <!-- 多样本切换条（仅在本页捕获到 >=2 份样本时自动显示，如 Arena 左右盲测对战） -->
+            <div class="specimens-bar" id="pageSpecimensBar"></div>
+
+            <!-- 关键词自动捕获快捷配置抽屉（点击右上角 🎯 展开） -->
+            <div class="drawer-card" id="kwConfigDrawer">
+              <div class="drawer-lbl">
+                <span>网页自动捕获与关键词特征</span>
+                <button type="button" class="quick-chip" id="btnResetKwDefault">恢复默认词</button>
+              </div>
+              <div class="chk-line">
+                <label for="chkAutoPage" style="cursor:pointer;">自动捕获页面生成的 SVG / HTML</label>
+                <input id="chkAutoPage" type="checkbox" checked />
+              </div>
+              <div class="chk-line">
+                <label for="chkKwOnly" style="cursor:pointer;">自动弹出仅限命中关键词特征</label>
+                <input id="chkKwOnly" type="checkbox" checked />
+              </div>
+              <textarea class="kw-textarea" id="inpCaptureKws" spellcheck="false" placeholder="逗号分隔关键词，如：鹈鹕, pelican, 自行车, bicycle..."></textarea>
+              <div style="display:flex;justify-content:flex-end;gap:6px;">
+                <button type="button" class="submit-ingest-btn" id="btnSaveKwAndScan" style="background:#24466b;">保存并扫描本页</button>
+              </div>
+            </div>
+
             <!-- 1. 纯净实时预览舞台 -->
             <div class="preview-stage-wrap">
               <div class="drag-shield"></div>
@@ -784,7 +1184,7 @@
               </div>
             </div>
 
-            <!-- 5. 按需展开：强度分布 + Top-5 候选（点击候选可直接填入纠错框） -->
+            <!-- 5. 按需展开：强度分布 + Top-5 候选 -->
             <div class="drawer-card" id="detailsDrawer">
               <div class="drawer-lbl">
                 <span>推理强度概率</span>
@@ -823,7 +1223,55 @@
     shadow.getElementById("previewFrame").src = chrome.runtime.getURL("sandbox-preview.html?cid=preview");
     shadow.getElementById("lbFrame").src = chrome.runtime.getURL("sandbox-preview.html?cid=lightbox");
 
+    syncKwDrawerUI();
     bindShadowEvents();
+  }
+
+  function syncKwDrawerUI() {
+    if (!shadow) return;
+    shadow.getElementById("chkAutoPage").checked = activeConfig.autoPageCapture !== false;
+    shadow.getElementById("chkKwOnly").checked = activeConfig.keywordOnlyAuto !== false;
+    shadow.getElementById("inpCaptureKws").value = activeConfig.captureKeywords || DEFAULT_CAPTURE_KEYWORDS;
+  }
+
+  function renderPageSpecimensBar() {
+    if (!shadow) return;
+    const bar = shadow.getElementById("pageSpecimensBar");
+    const btnScan = shadow.getElementById("btnScanPage");
+    const list = uiState.pageSpecimens || [];
+
+    btnScan.textContent = list.length > 0 ? `🔍 本页 ${list.length}` : "🔍 本页";
+
+    if (list.length <= 1) {
+      bar.classList.remove("show");
+      bar.innerHTML = "";
+      return;
+    }
+
+    bar.classList.add("show");
+    bar.innerHTML = list
+      .map((it, idx) => {
+        const kb = (it.code.length / 1024).toFixed(1);
+        const kwTag = it.kwHit ? ` 🎯${it.matchedKws[0]}` : "";
+        const isAct = it.hash === uiState.currentHash ? "active" : "";
+        return `<button type="button" class="spec-tab ${isAct}" data-spec-idx="${idx}" title="${escapeHtml(
+          it.origin + (it.matchedKws.length ? " · 命中特征: " + it.matchedKws.join(", ") : "")
+        )}">#${idx + 1} ${it.type} ${kb}K${escapeHtml(kwTag)}</button>`;
+      })
+      .join("");
+
+    bar.querySelectorAll("[data-spec-idx]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = list[Number(btn.dataset.specIdx)];
+        if (!item) return;
+        showWindowAndIdentify(item.code, {
+          autoTriggered: false,
+          forceRefresh: true,
+          originLabel: item.origin,
+          matchedKws: item.matchedKws
+        });
+      });
+    });
   }
 
   let toastTimer = null;
@@ -908,6 +1356,37 @@
     syncCorrectionModeLabel();
   }
 
+  async function executeManualPageScanAndOpen() {
+    ensureUI();
+    pingSubframesForSpecimens();
+    // Wait briefly so any cross-frame postMessage specimen arrives
+    await new Promise((r) => setTimeout(r, 85));
+    const found = scanPageSpecimens({ requireComplete: false });
+    uiState.pageSpecimens = found;
+    renderPageSpecimensBar();
+
+    if (found.length > 0) {
+      const top = found[0];
+      await showWindowAndIdentify(top.code, {
+        autoTriggered: false,
+        forceRefresh: true,
+        originLabel: top.origin,
+        matchedKws: top.matchedKws
+      });
+      if (found.length > 1) {
+        showInlineToast(`✓ 本页共捕获 ${found.length} 份代码（可在顶部标签切换）`);
+      }
+      return found;
+    } else {
+      uiState.visible = true;
+      uiState.minimized = false;
+      shadow.getElementById("minimizedFab").classList.remove("show");
+      shadow.getElementById("extWin").classList.add("show");
+      showInlineToast("当前页面未检测到可渲染的 SVG 或 HTML 代码", true);
+      return [];
+    }
+  }
+
   function bindShadowEvents() {
     const win = shadow.getElementById("extWin");
     const fab = shadow.getElementById("minimizedFab");
@@ -939,13 +1418,47 @@
       root.style.transform = "";
     });
 
+    // Scan Page Button
+    shadow.getElementById("btnScanPage").addEventListener("click", () => {
+      executeManualPageScanAndOpen();
+    });
+
+    // Toggle Keyword Config Drawer
+    const btnKw = shadow.getElementById("btnToggleKwCfg");
+    btnKw.addEventListener("click", () => {
+      uiState.kwDrawerOpen = !uiState.kwDrawerOpen;
+      shadow.getElementById("kwConfigDrawer").classList.toggle("open", uiState.kwDrawerOpen);
+      btnKw.classList.toggle("active", uiState.kwDrawerOpen);
+      if (uiState.kwDrawerOpen) syncKwDrawerUI();
+    });
+
+    shadow.getElementById("btnResetKwDefault").addEventListener("click", () => {
+      shadow.getElementById("inpCaptureKws").value = DEFAULT_CAPTURE_KEYWORDS;
+    });
+
+    shadow.getElementById("btnSaveKwAndScan").addEventListener("click", async () => {
+      const nextPatch = {
+        autoPageCapture: shadow.getElementById("chkAutoPage").checked,
+        keywordOnlyAuto: shadow.getElementById("chkKwOnly").checked,
+        captureKeywords: shadow.getElementById("inpCaptureKws").value.trim() || DEFAULT_CAPTURE_KEYWORDS
+      };
+      activeConfig = { ...activeConfig, ...nextPatch };
+      uiState.kwDrawerOpen = false;
+      shadow.getElementById("kwConfigDrawer").classList.remove("open");
+      btnKw.classList.remove("active");
+      try {
+        await chrome.runtime.sendMessage({ type: "SAVE_CONFIG", patch: nextPatch });
+      } catch (_) {}
+      await executeManualPageScanAndOpen();
+    });
+
     // Manual Refresh Clipboard Button
     shadow.getElementById("btnRefreshClip").addEventListener("click", async () => {
       try {
         const raw = await chrome.runtime.sendMessage({ type: "READ_RAW_CLIPBOARD" });
         if (raw && raw.ok && raw.hasCode && raw.code) {
           lastKnownOsClipHash = raw.hash || "";
-          showWindowAndIdentify(raw.code, { autoTriggered: false, forceRefresh: true });
+          showWindowAndIdentify(raw.code, { autoTriggered: false, forceRefresh: true, originLabel: "剪贴板" });
         } else if (uiState.currentCode) {
           deliverToSandbox("previewFrame", "preview", uiState.currentCode);
         }
@@ -983,7 +1496,7 @@
       btnDetails.textContent = uiState.detailsOpen ? "收起 ▴" : "详情 ▾";
     });
 
-    // Vendor / Model / Tier controls inside Correction Drawer
+    // Vendor / Model / Tier controls
     shadow.getElementById("corrVendorSelect").addEventListener("change", (e) => {
       const models = getModelsForVendor(e.target.value, uiState.currentVerdict?.allModels);
       if (models.length) {
@@ -1008,7 +1521,7 @@
       });
     });
 
-    // Submit Correction / Archive to th.629717.cc.cd/api/v1/samples
+    // Submit Correction / Archive
     shadow.getElementById("btnSubmitIngest").addEventListener("click", async () => {
       if (uiState.submittingSample || !uiState.currentCode) return;
       const vendor = shadow.getElementById("corrVendorSelect").value.trim();
@@ -1123,7 +1636,6 @@
     const tierKey = TIER_ORDER.includes(res.effortTier) ? res.effortTier : "high";
     const tierStr = TIER_SHORT[tierKey] || tierKey.toUpperCase();
 
-    // Verdict Card
     const card = shadow.getElementById("verdictCard");
     card.className = `verdict-card rarity-${rarity}`;
     shadow.getElementById("heroLogo").innerHTML = getVendorLogoSvg(activeTop.vendor || activeTop.label, 24);
@@ -1135,6 +1647,13 @@
     else if (rarity === "silver") badges.push(`<span class="tag silver">🥈 #${rank || 4}</span>`);
     badges.push(`<span class="tag ${activeTop.isOpen ? "open" : "closed"}">${activeTop.isOpen ? "开源" : "闭源"}</span>`);
     badges.push(`<span class="tag tier">强度 ${tierStr}</span>`);
+    if (uiState.currentMatchedKws && uiState.currentMatchedKws.length > 0) {
+      const kwBrief = uiState.currentMatchedKws.slice(0, 2).join("·");
+      const kwMore = uiState.currentMatchedKws.length > 2 ? `+${uiState.currentMatchedKws.length - 2}` : "";
+      badges.push(
+        `<span class="tag kw" title="命中关键词特征: ${escapeHtml(uiState.currentMatchedKws.join(", "))}">🎯 ${escapeHtml(kwBrief + kwMore)}</span>`
+      );
+    }
     if (res.userIngested) {
       badges.push(`<span class="tag ingested">✓ 已${res.userIngested.isCorrection ? "纠错" : "归档"}入库</span>`);
     } else if (exactHit && activeTop.id === overallTop.id) {
@@ -1149,14 +1668,11 @@
     uiState.detectedTier = tierKey;
     applyCorrectionSelection(activeTop.vendor, activeTop.label, tierKey);
 
-    // Quick-pick chips from Top-4 candidates for 1-click correction
+    // Quick-pick chips
     const quickCands = filtered.slice(0, 4);
     const qcWrap = shadow.getElementById("candidateQuickChips");
     qcWrap.innerHTML = quickCands
-      .map(
-        (m, i) =>
-          `<button type="button" class="quick-chip" data-cand-idx="${i}">${escapeHtml(m.label)}</button>`
-      )
+      .map((m, i) => `<button type="button" class="quick-chip" data-cand-idx="${i}">${escapeHtml(m.label)}</button>`)
       .join("");
     qcWrap.querySelectorAll("[data-cand-idx]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1165,7 +1681,7 @@
       });
     });
 
-    // Collapsible Details: Effort Tier Grid + Top-5 Bars
+    // Collapsible Details
     const tierMap = {};
     (res.tierProbabilities || []).forEach((tp) => { tierMap[tp.tier] = tp.probability; });
     const effConf = res.effortConfidence ?? tierMap[tierKey] ?? 0;
@@ -1223,13 +1739,8 @@
 
     const h = fastHash(parsed.code);
     const now = Date.now();
-    // Only dedupe sub-140ms double-fire from the exact same synchronous event
-    if (!forceRefresh && h === lastTriggerHash && now - lastTriggerTs < 180) {
-      return;
-    }
-    if (forceRefresh && h === lastTriggerHash && now - lastTriggerTs < 90) {
-      return;
-    }
+    if (!forceRefresh && h === lastTriggerHash && now - lastTriggerTs < 180) return;
+    if (forceRefresh && h === lastTriggerHash && now - lastTriggerTs < 90) return;
     lastTriggerHash = h;
     lastTriggerTs = now;
 
@@ -1239,10 +1750,14 @@
       const st = await chrome.runtime.sendMessage({ type: "GET_STATE" });
       if (myReqSeq !== identifySeq) return;
       if (st && st.config) {
-        if (autoTriggered && st.config.autoPopup === false) return;
-        uiState.sourceFilter = st.config.sourceFilter || "all";
+        activeConfig = { ...activeConfig, ...st.config };
+        if (autoTriggered && !opts.originLabel && activeConfig.autoPopup === false) return;
+        uiState.sourceFilter = activeConfig.sourceFilter || "all";
       }
     } catch (_) {}
+
+    const kwRes = matchKeywordFeatures(parsed.code, activeConfig.captureKeywords);
+    const matchedKws = Array.isArray(opts.matchedKws) ? opts.matchedKws : kwRes.matched;
 
     ensureUI();
     syncPillButtons();
@@ -1252,6 +1767,11 @@
     uiState.currentCode = parsed.code;
     uiState.currentHash = h;
     uiState.currentType = parsed.type;
+    uiState.currentOrigin = opts.originLabel || "";
+    uiState.currentMatchedKws = matchedKws;
+    autoCapturedPageHashes.add(h);
+
+    renderPageSpecimensBar();
 
     const win = shadow.getElementById("extWin");
     const fab = shadow.getElementById("minimizedFab");
@@ -1260,11 +1780,11 @@
     shadow.getElementById("inlineToast").classList.remove("show");
 
     const kb = (parsed.code.length / 1024).toFixed(1);
-    shadow.getElementById("formatChip").textContent = `${parsed.type} · ${kb} KB`;
+    const prefix = uiState.currentOrigin ? `${uiState.currentOrigin} · ` : "";
+    shadow.getElementById("formatChip").textContent = `${prefix}${parsed.type} ${kb}K`;
     shadow.getElementById("elapsedLbl").textContent = "识别中...";
     shadow.getElementById("heroTitle").textContent = "正在识别模型...";
 
-    // Render preview immediately (Shadow-DOM SVG instant layer + sandbox iframe full HTML/JS layer)
     deliverToSandbox("previewFrame", "preview", parsed.code);
 
     try {
@@ -1278,7 +1798,7 @@
 
       if (res && res.ok && res.verdict) {
         uiState.currentVerdict = res.verdict;
-        shadow.getElementById("elapsedLbl").textContent = `${res.verdict.elapsedMs || 10} ms`;
+        shadow.getElementById("elapsedLbl").textContent = `${res.verdict.elapsedMs || 10}ms`;
         renderVerdictUI();
       } else {
         shadow.getElementById("elapsedLbl").textContent = "异常";
@@ -1292,9 +1812,7 @@
     }
   }
 
-  // Unified Copy-Gesture Clipboard Poller:
-  // Waits for the OS clipboard hash to ACTUALLY change during async copy buttons (never accepts stale clipboard at 65ms!),
-  // and cleanly refreshes at 460ms if the user intentionally re-copied the exact same code.
+  // Unified Copy-Gesture Clipboard Poller
   function pollClipboardForCopyGesture(fallbackSelection = "") {
     const myGesture = ++gestureSeq;
     const gestureStartTs = Date.now();
@@ -1305,7 +1823,6 @@
     delays.forEach((delay, idx) => {
       setTimeout(async () => {
         if (resolved || myGesture !== gestureSeq) return;
-        // If MAIN-world clipboard-hook already delivered exact text for this gesture, stop polling!
         if (lastHookHandledTs >= gestureStartTs - 35) {
           resolved = true;
           return;
@@ -1317,14 +1834,7 @@
           if (raw && raw.ok) {
             if (raw.hash) lastKnownOsClipHash = raw.hash;
             if (raw.hasCode && raw.code) {
-              // Early polls (65ms / 200ms): ONLY accept if clipboard hash changed from baselineHash!
-              if (raw.hash !== baselineHash) {
-                resolved = true;
-                await showWindowAndIdentify(raw.code, { autoTriggered: true, forceRefresh: true });
-                return;
-              }
-              // By 460ms (idx >= 2): async copy has finished; user intentionally re-copied identical code!
-              if (idx >= 2) {
+              if (raw.hash !== baselineHash || idx >= 2) {
                 resolved = true;
                 await showWindowAndIdentify(raw.code, { autoTriggered: true, forceRefresh: true });
                 return;
@@ -1342,7 +1852,6 @@
   }
 
   // ==================== CLIPBOARD LISTENERS ====================
-  // 1. Direct MAIN-world hook (writeText / clipboard.write / plain setData / execCommand)
   window.addEventListener("message", (ev) => {
     const d = ev && ev.data;
     if (!d || d.source !== "__PELICAN_EXT_CLIPBOARD__" || typeof d.text !== "string") return;
@@ -1353,7 +1862,6 @@
     lastKnownOsClipHash = fastHash(parsed.code);
     showWindowAndIdentify(parsed.code, { autoTriggered: true, forceRefresh: true });
 
-    // Verify OS clipboard once at 240ms in case a chained async writer placed newer code right after
     setTimeout(async () => {
       try {
         const raw = await chrome.runtime.sendMessage({ type: "READ_RAW_CLIPBOARD" });
@@ -1367,13 +1875,11 @@
     }, 240);
   });
 
-  // 2. Native DOM copy event (Ctrl+C / Cmd+C)
   document.addEventListener("copy", () => {
     const selFallback = window.getSelection ? window.getSelection().toString() : "";
     pollClipboardForCopyGesture(selFallback);
   }, false);
 
-  // 3. Clicks on Copy / 复制 buttons (handles async fetch-then-copy buttons and cross-frame UI)
   function isLikelyCopyButton(target) {
     if (!target || typeof target.closest !== "function") return false;
     const btn = target.closest("button, [role='button'], a, [data-clipboard-text], [class*='copy'], [class*='Copy']");
@@ -1394,7 +1900,6 @@
     pollClipboardForCopyGesture("");
   }, true);
 
-  // 4. Window focus & tab visibility return: detect new code copied from other tabs / external apps
   function checkOnReturnToTab() {
     setTimeout(async () => {
       try {
@@ -1406,7 +1911,11 @@
         if (res && res.ok && res.verdict && res.code) {
           lastKnownOsClipHash = res.hash || fastHash(res.code);
           const st = await chrome.runtime.sendMessage({ type: "GET_STATE" });
-          if (st && st.config) uiState.sourceFilter = st.config.sourceFilter || "all";
+          if (st && st.config) {
+            activeConfig = { ...activeConfig, ...st.config };
+            uiState.sourceFilter = activeConfig.sourceFilter || "all";
+          }
+          const kwRes = matchKeywordFeatures(res.code, activeConfig.captureKeywords);
           ensureUI();
           syncPillButtons();
           uiState.visible = true;
@@ -1414,12 +1923,14 @@
           uiState.currentCode = res.code;
           uiState.currentHash = lastKnownOsClipHash;
           uiState.currentType = res.codeType || "SVG";
+          uiState.currentOrigin = "剪贴板";
+          uiState.currentMatchedKws = kwRes.matched;
           uiState.currentVerdict = res.verdict;
           const win = shadow.getElementById("extWin");
           shadow.getElementById("minimizedFab").classList.remove("show");
           win.classList.add("show");
-          shadow.getElementById("formatChip").textContent = `${uiState.currentType} · ${(res.code.length / 1024).toFixed(1)} KB`;
-          shadow.getElementById("elapsedLbl").textContent = `${res.verdict.elapsedMs || 10} ms`;
+          shadow.getElementById("formatChip").textContent = `${uiState.currentType} · ${(res.code.length / 1024).toFixed(1)}K`;
+          shadow.getElementById("elapsedLbl").textContent = `${res.verdict.elapsedMs || 10}ms`;
           deliverToSandbox("previewFrame", "preview", res.code);
           renderVerdictUI();
         }
@@ -1432,14 +1943,45 @@
     if (document.visibilityState === "visible") checkOnReturnToTab();
   });
 
-  // 5. Messages from Background / Popup
+  // Messages from Background / Popup
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || !msg.type) return false;
+
     if (msg.type === "SHOW_PELICAN_FLOATING_PREVIEW" && msg.code) {
       showWindowAndIdentify(msg.code, { autoTriggered: false, forceRefresh: true });
       sendResponse({ ok: true });
       return false;
     }
+
+    if (msg.type === "TRIGGER_PAGE_SCAN_UI") {
+      executeManualPageScanAndOpen().then((found) => {
+        sendResponse({ ok: true, count: found.length });
+      });
+      return true;
+    }
+
+    if (msg.type === "SCAN_PAGE_SPECIMENS") {
+      (async () => {
+        pingSubframesForSpecimens();
+        await new Promise((r) => setTimeout(r, 85));
+        const found = scanPageSpecimens({ requireComplete: false });
+        uiState.pageSpecimens = found;
+        if (shadow) renderPageSpecimensBar();
+        sendResponse({
+          ok: true,
+          specimens: found.map((x) => ({
+            hash: x.hash,
+            type: x.type,
+            code: x.code,
+            origin: x.origin,
+            kwHit: x.kwHit,
+            matchedKws: x.matchedKws
+          }))
+        });
+      })();
+      return true;
+    }
+
     if (msg.type === "TOGGLE_PELICAN_WINDOW") {
       ensureUI();
       const win = shadow.getElementById("extWin");
@@ -1461,16 +2003,18 @@
     return false;
   });
 
-  // Sync pill filter & latest verdict updates across Popup and Webpage Panel
+  // Sync config & latest verdict updates across Popup and Webpage Panel
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes.pelican_ext_config_v1 && changes.pelican_ext_config_v1.newValue) {
-      const nextFilter = changes.pelican_ext_config_v1.newValue.sourceFilter || "all";
+      activeConfig = { ...activeConfig, ...changes.pelican_ext_config_v1.newValue };
+      const nextFilter = activeConfig.sourceFilter || "all";
       if (nextFilter !== uiState.sourceFilter) {
         uiState.sourceFilter = nextFilter;
         syncPillButtons();
         renderVerdictUI();
       }
+      syncKwDrawerUI();
     }
     if (changes.pelican_ext_latest_v1 && changes.pelican_ext_latest_v1.newValue) {
       const latest = changes.pelican_ext_latest_v1.newValue;

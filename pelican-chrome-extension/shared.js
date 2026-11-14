@@ -7,6 +7,10 @@
   const TIER_CN = { low: "低 Low", medium: "中 Med", high: "高 High", max: "极高 Max" };
   const TIER_SHORT = { low: "LOW", medium: "MED", high: "HIGH", max: "MAX" };
 
+  // Default high-signal keyword signatures for auto-capturing SVG / HTML specimens on webpages
+  const DEFAULT_CAPTURE_KEYWORDS =
+    "鹈鹕, pelican, 自行车, 单车, 骑行, bicycle, bike, cyclist, 喉囊, pouch, gular, beak, 鸟喙, pedal, 脚踏, handlebar, 车把, wheel, 车轮, spoke, 辐条, saddle, 车座, crank, 翅膀, wing, feather";
+
   // Aligned with th.629717.cc.cd 3-level Vendor -> Short Model catalog
   const SHORT_VENDOR_CATALOG = [
     { id: "Claude", models: ["opus-5.5", "opus-5.6", "fable-5.1", "sonnet-5.5", "haiku-5.5", "opus-5", "sonnet-5", "fable-5", "opus-4.8", "opus-4.6", "haiku-4.5"] },
@@ -128,6 +132,80 @@
     }
 
     return parseSingleCodeBlock(raw);
+  }
+
+  // Ensure streaming LLM code blocks have closed cleanly before auto-capturing
+  function isCompleteSpecimenCode(parsed) {
+    if (!parsed || !parsed.code || parsed.code.length < 60) return false;
+    const c = parsed.code.trim();
+    if (parsed.type === "SVG") {
+      return /<\/svg>\s*$/i.test(c);
+    }
+    if (/^(?:<!doctype\s+html|<html[\s>])/i.test(c)) {
+      return /<\/html>\s*$/i.test(c);
+    }
+    return /<\/(svg|div|section|main|script|body|canvas)>\s*$/i.test(c);
+  }
+
+  function parseKeywordsList(keywordsRaw) {
+    const src = typeof keywordsRaw === "string" ? keywordsRaw : DEFAULT_CAPTURE_KEYWORDS;
+    const parts = src
+      .split(/[,，;；\r\n]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return Array.from(new Set(parts));
+  }
+
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // High-precision keyword signature matcher (camelCase & identifier boundary safe for English, direct for CJK)
+  function matchKeywordFeatures(code, keywordsRaw) {
+    if (!code || typeof code !== "string") {
+      return { hit: false, matched: [], score: 0 };
+    }
+    const list = Array.isArray(keywordsRaw) ? keywordsRaw : parseKeywordsList(keywordsRaw);
+    if (!list.length) {
+      return { hit: false, matched: [], score: 0 };
+    }
+
+    // Scan up to 250KB to keep DOM scanning instantaneous even on huge bundles
+    const sample = code.length > 250000 ? code.slice(0, 250000) : code;
+    // Split camelCase / PascalCase into space-separated words before lowercasing
+    const normalized = sample
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+      .toLowerCase();
+    const matched = [];
+
+    for (let i = 0; i < list.length; i++) {
+      const kw = list[i];
+      if (!kw) continue;
+      const lowerKw = kw.toLowerCase();
+      if (!normalized.includes(lowerKw)) continue;
+
+      if (/^[a-z]+$/i.test(kw)) {
+        const wordRe = new RegExp(`(?:^|[^a-z])${escapeRegExp(lowerKw)}s?(?=$|[^a-z])`);
+        if (wordRe.test(normalized)) {
+          matched.push(kw);
+        }
+      } else {
+        matched.push(kw);
+      }
+    }
+
+    // Structural visual bonus (SVG primitives / Canvas / requestAnimationFrame)
+    const shapeMatches = sample.match(/<(path|circle|ellipse|rect|line|polygon|polyline|canvas)\b/gi);
+    const shapeCount = shapeMatches ? shapeMatches.length : 0;
+    const score = matched.length * 100 + Math.min(80, shapeCount * 2) + Math.min(30, Math.round(sample.length / 1024));
+
+    return {
+      hit: matched.length > 0,
+      matched,
+      shapeCount,
+      score
+    };
   }
 
   // Extract largest sanitized static <svg> from SVG or HTML for instant zero-flash / CSP-resilient fallback
@@ -430,6 +508,7 @@
   root.PelicanShared = {
     DEFAULT_API_BASE,
     DEFAULT_API_KEY,
+    DEFAULT_CAPTURE_KEYWORDS,
     TIER_ORDER,
     TIER_CN,
     TIER_SHORT,
@@ -437,6 +516,9 @@
     escapeHtml,
     fastHash,
     extractRenderableCode,
+    isCompleteSpecimenCode,
+    parseKeywordsList,
+    matchKeywordFeatures,
     extractSanitizedSvgMarkup,
     isModelOpenSource,
     inferShortVendor,

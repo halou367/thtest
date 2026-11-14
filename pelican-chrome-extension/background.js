@@ -3,6 +3,7 @@ importScripts("shared.js");
 const {
   DEFAULT_API_BASE,
   DEFAULT_API_KEY,
+  DEFAULT_CAPTURE_KEYWORDS,
   TIER_ORDER,
   extractRenderableCode,
   fastHash,
@@ -32,6 +33,12 @@ async function getConfig() {
     apiBase: String(cfg.apiBase || DEFAULT_API_BASE).replace(/\/+$/, ""),
     apiKey: String(cfg.apiKey || DEFAULT_API_KEY),
     autoPopup: cfg.autoPopup !== false,
+    autoPageCapture: cfg.autoPageCapture !== false,
+    keywordOnlyAuto: cfg.keywordOnlyAuto !== false,
+    captureKeywords:
+      typeof cfg.captureKeywords === "string" && cfg.captureKeywords.trim().length > 0
+        ? cfg.captureKeywords
+        : DEFAULT_CAPTURE_KEYWORDS,
     sourceFilter: cfg.sourceFilter || "all"
   };
 }
@@ -54,23 +61,19 @@ async function setLastFocusHash(h) {
 }
 
 async function ensureDefaults() {
-  const data = await chrome.storage.local.get(STORAGE_KEYS.CONFIG);
-  if (!data[STORAGE_KEYS.CONFIG]) {
-    await chrome.storage.local.set({
-      [STORAGE_KEYS.CONFIG]: {
-        apiBase: DEFAULT_API_BASE,
-        apiKey: DEFAULT_API_KEY,
-        autoPopup: true,
-        sourceFilter: "all"
-      }
-    });
-  }
+  const cur = await getConfig();
+  await chrome.storage.local.set({ [STORAGE_KEYS.CONFIG]: cur });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   ensureDefaults();
   try {
     chrome.contextMenus.removeAll(() => {
+      chrome.contextMenus.create({
+        id: "pelican-scan-page",
+        title: "自动扫描并捕获本页 SVG / HTML 代码（关键词特征优先）",
+        contexts: ["page"]
+      });
       chrome.contextMenus.create({
         id: "pelican-identify-selection",
         title: "使用鹈鹕实验室鉴定选中的 SVG / HTML 模型",
@@ -271,7 +274,6 @@ async function submitSampleToBackend({ rawCode, codeType, vendor, model, tier, i
     (savedItem && savedItem.displayModel) || buildDisplayLabel(cleanVendor, cleanModel);
   const shortV = inferShortVendor(`${cleanVendor} ${savedDisplay}`);
 
-  // Update cached & persisted verdict so UI immediately reflects the confirmed ground-truth
   const prev = baseVerdict || verdictMemCache.get(hash) || {};
   const nextDetected = {
     ...(prev.detectedModel || {}),
@@ -364,7 +366,9 @@ async function persistLatestAndHistory(code, type, hash, verdict) {
 // Context Menu & Shortcut Handlers
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab || !tab.id) return;
-  if (info.menuItemId === "pelican-identify-selection" && info.selectionText) {
+  if (info.menuItemId === "pelican-scan-page") {
+    chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_PAGE_SCAN_UI" }).catch(() => {});
+  } else if (info.menuItemId === "pelican-identify-selection" && info.selectionText) {
     const parsed = extractRenderableCode(info.selectionText);
     if (parsed) {
       chrome.tabs.sendMessage(tab.id, {
@@ -402,7 +406,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       trigger: "快捷键唤醒"
     }).catch(() => {});
   } else {
-    chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_PELICAN_WINDOW" }).catch(() => {});
+    chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_PAGE_SCAN_UI" }).catch(() => {});
   }
 });
 
