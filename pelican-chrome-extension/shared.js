@@ -188,6 +188,42 @@
     return AI_OR_PREVIEW_HOST_RE.test(String(hostname).trim());
   }
 
+  function isArenaHost(hostname) {
+    if (!hostname) return false;
+    return /(?:^|\.)(arena\.ai|lmarena\.ai|lmsys\.org)$/i.test(String(hostname).trim());
+  }
+
+  // Detect Arena.ai open-source thinking marker (e.g. "Thought for 1 second" / Brain icon + exposed CoT)
+  function parseOpenThinkingMarker(buttonTexts, hasBrainIcon = false, cotTextSample = "") {
+    const texts = Array.isArray(buttonTexts) ? buttonTexts : [];
+    const hasCot = Boolean(cotTextSample && String(cotTextSample).trim().length > 8);
+
+    for (let i = 0; i < texts.length; i++) {
+      const raw = String(texts[i] || "").replace(/\s+/g, " ").trim();
+      if (!raw || raw.length > 80) continue;
+
+      const mEn = raw.match(/\b(Thought\s+for\s+[0-9a-zA-Z.<>\s]{1,36}|Thought\s+briefly)\b/i);
+      if (mEn) {
+        return { detected: true, label: mEn[1].trim(), hasCot };
+      }
+
+      const mCn = raw.match(/((?:已思考|思考了?)\s*\d+\s*(?:秒|分钟|分|s\b))/i);
+      if (mCn) {
+        return { detected: true, label: mCn[1].trim(), hasCot };
+      }
+
+      if ((hasBrainIcon || hasCot) && /^(?:Thought|Thinking|深度思考|思考过程)(?:[.…\s:：0-9sms秒]*)$/i.test(raw)) {
+        return { detected: true, label: raw, hasCot };
+      }
+    }
+
+    if (hasBrainIcon && hasCot) {
+      return { detected: true, label: "Thought (Open CoT)", hasCot: true };
+    }
+
+    return { detected: false, label: "", hasCot: false };
+  }
+
   function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -258,7 +294,7 @@
     if (item.kwHit) return true;
 
     // 2. Complete visual SVG / HTML artworks in code blocks, preview iframes, subframes, or local files trigger even without keywords!
-    if (/(预览|内嵌帧|子帧|代码块|本地文档)/.test(String(item.origin || ""))) {
+    if (/(预览|内嵌帧|子帧|代码块|本地文档|小窗|视窗)/.test(String(item.origin || ""))) {
       if (item.hasCanvas) return true;
       if ((item.shapeCount || 0) >= 4) return true;
       if (/<svg[\s>]/i.test(item.code) && item.code.length >= 260) return true;
@@ -585,6 +621,8 @@
     parseKeywordsList,
     mergeWithDefaultKeywords,
     isAiOrPreviewHost,
+    isArenaHost,
+    parseOpenThinkingMarker,
     matchKeywordFeatures,
     isAutoTriggerSpecimen,
     extractSanitizedSvgMarkup,

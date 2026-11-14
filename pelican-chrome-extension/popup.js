@@ -22,6 +22,7 @@
   let currentType = "SVG";
   let currentMatchedKws = [];
   let currentVerdict = null;
+  let currentOpenThinking = null;
   let captureKeywordsStr = DEFAULT_CAPTURE_KEYWORDS;
   let pageSpecimens = [];
 
@@ -365,6 +366,12 @@
     if (rarity === "gold") badges.push(`<span class="tag gold">🥇 #${rank || 1}</span>`);
     else if (rarity === "silver") badges.push(`<span class="tag silver">🥈 #${rank || 4}</span>`);
     badges.push(`<span class="tag ${activeTop.isOpen ? "open" : "closed"}">${activeTop.isOpen ? "开源" : "闭源"}</span>`);
+    // Arena v1.4.0: open-thinking marker emphasis
+    if (currentOpenThinking && currentOpenThinking.detected) {
+      badges.push(
+        `<span class="tag open-thinking" title="Arena 开源思考标记: ${escapeHtml(currentOpenThinking.label || "Thought")}">🧠 开源思考 · ${escapeHtml(currentOpenThinking.label || "Thought")}</span>`
+      );
+    }
     badges.push(`<span class="tag tier">强度 ${tierStr}</span>`);
     if (currentMatchedKws && currentMatchedKws.length > 0) {
       const kwBrief = currentMatchedKws.slice(0, 2).join("·");
@@ -570,6 +577,7 @@
       currentType = st.latest.type || "SVG";
       currentMatchedKws = matchKeywordFeatures(currentCode, captureKeywordsStr).matched;
       currentVerdict = st.latest.verdict;
+      currentOpenThinking = st.latest.openThinking || null;
       document.getElementById("statusSub").textContent = `${currentType} · ${(currentCode.length / 1024).toFixed(1)}K`;
       sendCodeToPreview(currentCode);
       renderVerdict();

@@ -150,13 +150,13 @@ async function readSystemClipboardViaOffscreen() {
   return "";
 }
 
-async function runIdentifyRequest(rawCode, codeType = "SVG", forceBypassCache = false) {
+async function runIdentifyRequest(rawCode, codeType = "SVG", forceBypassCache = false, openThinking = null) {
   const hash = fastHash(rawCode);
   await setLastFocusHash(hash);
 
   if (!forceBypassCache && verdictMemCache.has(hash)) {
     const cached = verdictMemCache.get(hash);
-    await persistLatestAndHistory(rawCode, codeType, hash, cached);
+    await persistLatestAndHistory(rawCode, codeType, hash, cached, openThinking);
     return { ok: true, verdict: cached, hash, cached: true };
   }
 
@@ -214,7 +214,7 @@ async function runIdentifyRequest(rawCode, codeType = "SVG", forceBypassCache = 
         verdictMemCache.delete(oldestKey);
       }
 
-      await persistLatestAndHistory(rawCode, codeType, hash, json);
+      await persistLatestAndHistory(rawCode, codeType, hash, json, openThinking);
       return { ok: true, verdict: json, hash, cached: false };
     } finally {
       inflightRequests.delete(hash);
@@ -341,7 +341,7 @@ async function submitSampleToBackend({ rawCode, codeType, vendor, model, tier, i
   };
 }
 
-async function persistLatestAndHistory(code, type, hash, verdict) {
+async function persistLatestAndHistory(code, type, hash, verdict, openThinking = null) {
   const det = verdict.detectedModel || { label: "Unknown", vendor: "Other" };
   const safeCode = code.length <= 350000 ? code : code.slice(0, 350000);
   const entry = {
@@ -356,6 +356,7 @@ async function persistLatestAndHistory(code, type, hash, verdict) {
     probability: det.probability || 0,
     isOpen: isModelOpenSource(det),
     ingested: Boolean(verdict.userIngested),
+    openThinking: openThinking && openThinking.detected ? openThinking : null,
     verdict
   };
 
@@ -463,7 +464,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: false, error: "未检测到有效的 SVG 或 HTML 代码" });
           return;
         }
-        const result = await runIdentifyRequest(parsed.code, parsed.type, Boolean(msg.forceBypassCache));
+        const result = await runIdentifyRequest(
+          parsed.code,
+          parsed.type,
+          Boolean(msg.forceBypassCache),
+          msg.openThinking || null
+        );
         sendResponse({ ...result, code: parsed.code, codeType: parsed.type });
       } catch (err) {
         sendResponse({ ok: false, error: err && err.message ? err.message : String(err) });

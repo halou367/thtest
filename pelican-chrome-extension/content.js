@@ -13,6 +13,8 @@
     extractRenderableCode,
     isCompleteSpecimenCode,
     isAiOrPreviewHost,
+    isArenaHost,
+    parseOpenThinkingMarker,
     matchKeywordFeatures,
     isAutoTriggerSpecimen,
     extractSanitizedSvgMarkup,
@@ -47,6 +49,13 @@
   };
   const autoCapturedPageHashes = new Set();
   const subframeSpecimensMap = new Map();
+  // Arena.ai v1.4.0: blob: preview mini-window specimens + React Fiber recovered specimens
+  const arenaBlobSpecimensMap = new Map();
+  const arenaFiberSpecimensMap = new Map();
+  const pendingFiberResolvers = new Map();
+  let fiberReqSeq = 0;
+  let arenaBlobDebounceTimer = null;
+  let lastArenaOpenThinking = null;
   let lastObservedHref = location.href;
   let domSettleTimer = null;
   let lastMutationBurstTs = 0;
@@ -126,6 +135,33 @@
         schedulePageAutoCapture(300);
       }
     }
+
+    // Arena.ai v1.4.0: sandboxed blob: preview mini-window captured via MAIN-world URL.createObjectURL hook
+    if (d.source === "__PELICAN_BLOB_SPECIMEN__" && typeof d.text === "string" && d.text.length >= 100) {
+      const parsed = extractRenderableCode(d.text);
+      if (parsed && isCompleteSpecimenCode(parsed)) {
+        const h = fastHash(parsed.code);
+        arenaBlobSpecimensMap.set(h, {
+          hash: h,
+          type: parsed.type,
+          code: parsed.code,
+          origin: "对话预览小窗",
+          blobUrl: d.blobUrl || ""
+        });
+        if (arenaBlobDebounceTimer) clearTimeout(arenaBlobDebounceTimer);
+        arenaBlobDebounceTimer = setTimeout(() => schedulePageAutoCapture(250), 350);
+      }
+      return;
+    }
+
+    // Arena.ai v1.4.0: React Fiber recovery response from MAIN-world hook
+    if (d.source === "__PELICAN_ARENA_FIBER_RES__" && Array.isArray(d.items)) {
+      const resolver = pendingFiberResolvers.get(d.reqId);
+      if (resolver) {
+        pendingFiberResolvers.delete(d.reqId);
+        resolver(d.items);
+      }
+    }
   });
 
   function pingSubframesForSpecimens() {
@@ -141,6 +177,102 @@
         } catch (_) {}
       }
     } catch (_) {}
+  }
+
+  // ============ Arena.ai v1.4.0: latest-turn targeting + open-thinking marker + Fiber recovery ============
+
+  function getLatestAssistantMessageEls(limit = 3) {
+    const all = document.querySelectorAll('[data-agent-transcript-message="true"], [data-chat-message-id]');
+    const assistants = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      if (el.querySelector && el.querySelector("[data-user-message-layout]")) continue;
+      if (el.closest && el.closest("[data-user-message-layout]")) continue;
+      assistants.push(el);
+    }
+    return assistants.slice(-limit);
+  }
+
+  function getOpenThinkingMarkerForMessage(msgEl) {
+    if (!msgEl || typeof parseOpenThinkingMarker !== "function") {
+      return { detected: false, label: "", hasCot: false };
+    }
+    const btnTexts = [];
+    let hasBrainIcon = false;
+    const btns = msgEl.querySelectorAll ? msgEl.querySelectorAll("button") : [];
+    for (let i = 0; i < btns.length; i++) {
+      const t = (btns[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (t && t.length <= 80) btnTexts.push(t);
+      // Brain icon (Arena open-thinking) has many paths in one svg; copy/check icons have 1-2
+      const svgs = btns[i].querySelectorAll ? btns[i].querySelectorAll("svg") : [];
+      for (let j = 0; j < svgs.length; j++) {
+        if (svgs[j].querySelectorAll("path").length >= 6) hasBrainIcon = true;
+      }
+    }
+    // Exposed chain-of-thought text (font-mono tiny paragraph under the Thought button)
+    let cotText = "";
+    const monoEls = msgEl.querySelectorAll ? msgEl.querySelectorAll(".font-mono") : [];
+    for (let i = 0; i < monoEls.length; i++) {
+      const t = (monoEls[i].textContent || "").trim();
+      if (t.length > 8 && t.length < 600 && /[a-zA-Z]{3,}/.test(t)) {
+        cotText = t;
+        break;
+      }
+    }
+    return parseOpenThinkingMarker(btnTexts, hasBrainIcon, cotText);
+  }
+
+  function requestArenaFiberSpecimens(targetIds) {
+    return new Promise((resolve) => {
+      const reqId = ++fiberReqSeq;
+      const timer = setTimeout(() => {
+        pendingFiberResolvers.delete(reqId);
+        resolve([]);
+      }, 1200);
+      pendingFiberResolvers.set(reqId, (items) => {
+        clearTimeout(timer);
+        resolve(items || []);
+      });
+      try {
+        window.postMessage(
+          { source: "__PELICAN_SCAN_ARENA_FIBER_REQ__", reqId, targetIds: targetIds || [] },
+          "*"
+        );
+      } catch (_) {
+        clearTimeout(timer);
+        pendingFiberResolvers.delete(reqId);
+        resolve([]);
+      }
+    });
+  }
+
+  // Async Arena Fiber scan: only the latest assistant turn(s), never the whole transcript
+  async function scanArenaFiberSpecimens() {
+    if (!isArenaHost(location.hostname)) return [];
+    const latestEls = getLatestAssistantMessageEls(3);
+    if (!latestEls.length) return [];
+    const targetIds = latestEls
+      .map((el) => el.getAttribute("data-chat-message-id") || el.id || "")
+      .filter(Boolean);
+    if (!targetIds.length) return [];
+    const items = await requestArenaFiberSpecimens(targetIds);
+    const out = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it || typeof it.text !== "string") continue;
+      const parsed = extractRenderableCode(it.text);
+      if (!parsed || !isCompleteSpecimenCode(parsed)) continue;
+      const h = fastHash(parsed.code);
+      arenaFiberSpecimensMap.set(h, {
+        hash: h,
+        type: parsed.type,
+        code: parsed.code,
+        origin: it.origin || "对话预览小窗",
+        msgId: it.msgId || ""
+      });
+      out.push(arenaFiberSpecimensMap.get(h));
+    }
+    return out;
   }
 
   function isStandaloneIllustrationSvg(svgEl) {
@@ -324,6 +456,26 @@
       });
     }
 
+    // 3b. Arena.ai v1.4.0: blob: preview mini-window specimens (URL.createObjectURL hook)
+    for (const item of arenaBlobSpecimensMap.values()) {
+      rawCandidates.push({
+        type: item.type,
+        code: item.code,
+        origin: item.origin,
+        contextHint: isAiHost ? document.title || "" : ""
+      });
+    }
+
+    // 3c. Arena.ai v1.4.0: React Fiber recovered specimens (collapsed preview mini-windows / workspace viewer)
+    for (const item of arenaFiberSpecimensMap.values()) {
+      rawCandidates.push({
+        type: item.type,
+        code: item.code,
+        origin: item.origin,
+        contextHint: isAiHost ? document.title || "" : ""
+      });
+    }
+
     // 4. Standalone rendered <svg> illustrations in page DOM
     const svgs = document.querySelectorAll("svg");
     for (let i = 0; i < svgs.length; i++) {
@@ -391,6 +543,9 @@
       lastObservedHref = location.href;
       autoCapturedPageHashes.clear();
       subframeSpecimensMap.clear();
+      arenaBlobSpecimensMap.clear();
+      arenaFiberSpecimensMap.clear();
+      lastArenaOpenThinking = null;
     }
     if (domSettleTimer) clearTimeout(domSettleTimer);
     domSettleTimer = setTimeout(() => {
@@ -398,8 +553,20 @@
     }, delayMs);
   }
 
-  function runAutoPageCaptureCheck() {
+  async function runAutoPageCaptureCheck() {
     if (!activeConfig.autoPageCapture) return;
+    // Arena.ai v1.4.0: recover collapsed preview mini-window code from React Fiber (latest turn only)
+    // and read the open-thinking marker ("Thought for 1 second" + brain icon) for open-source emphasis.
+    if (isArenaHost(location.hostname)) {
+      try {
+        const latestEls = getLatestAssistantMessageEls(3);
+        if (latestEls.length) {
+          const marker = getOpenThinkingMarkerForMessage(latestEls[latestEls.length - 1]);
+          if (marker && marker.detected) lastArenaOpenThinking = marker;
+        }
+        await scanArenaFiberSpecimens();
+      } catch (_) {}
+    }
     const allFound = scanPageSpecimens({ requireComplete: true });
     if (!allFound.length) return;
 
@@ -865,6 +1032,7 @@
     .tag.silver { background: rgba(120, 139, 161, 0.2); color: #3d4f63; }
     .tag.ingested { background: rgba(16, 185, 129, 0.18); color: #0f5c41; }
     .tag.kw { background: rgba(245, 158, 11, 0.16); color: #92400e; }
+    .tag.open-thinking { background: rgba(16, 185, 129, 0.22); color: #065f46; border: 1px solid rgba(16, 185, 129, 0.45); font-weight: 800; }
 
     .conf-num {
       font-size: 18px;
@@ -1457,6 +1625,12 @@
   async function executeManualPageScanAndOpen() {
     ensureUI();
     pingSubframesForSpecimens();
+    // Arena.ai v1.4.0: also recover latest-turn Fiber specimens on manual scan
+    if (isArenaHost(location.hostname)) {
+      try {
+        await scanArenaFiberSpecimens();
+      } catch (_) {}
+    }
     // Wait briefly so any cross-frame postMessage specimen arrives
     await new Promise((r) => setTimeout(r, 85));
     const found = scanPageSpecimens({ requireComplete: false });
@@ -1744,6 +1918,13 @@
     if (rarity === "gold") badges.push(`<span class="tag gold">🥇 #${rank || 1}</span>`);
     else if (rarity === "silver") badges.push(`<span class="tag silver">🥈 #${rank || 4}</span>`);
     badges.push(`<span class="tag ${activeTop.isOpen ? "open" : "closed"}">${activeTop.isOpen ? "开源" : "闭源"}</span>`);
+    // Arena.ai v1.4.0: open-thinking marker ("Thought for 1 second" + brain icon) => emphasize open-source result
+    const ot = uiState.currentOpenThinking;
+    if (ot && ot.detected) {
+      badges.push(
+        `<span class="tag open-thinking" title="Arena 开源思考标记: ${escapeHtml(ot.label || "Thought")}${ot.hasCot ? " · 已暴露思考过程" : ""}">🧠 开源思考 · ${escapeHtml(ot.label || "Thought")}</span>`
+      );
+    }
     badges.push(`<span class="tag tier">强度 ${tierStr}</span>`);
     if (uiState.currentMatchedKws && uiState.currentMatchedKws.length > 0) {
       const kwBrief = uiState.currentMatchedKws.slice(0, 2).join("·");
@@ -1867,6 +2048,7 @@
     uiState.currentType = parsed.type;
     uiState.currentOrigin = opts.originLabel || "";
     uiState.currentMatchedKws = matchedKws;
+    uiState.currentOpenThinking = opts.openThinking || lastArenaOpenThinking || null;
     autoCapturedPageHashes.add(h);
 
     renderPageSpecimensBar();
@@ -1889,7 +2071,10 @@
       const res = await chrome.runtime.sendMessage({
         type: "IDENTIFY_CODE",
         code: parsed.code,
-        autoTriggered: false
+        autoTriggered: false,
+        openThinking: uiState.currentOpenThinking && uiState.currentOpenThinking.detected
+          ? uiState.currentOpenThinking
+          : null
       });
 
       if (myReqSeq !== identifySeq) return;
