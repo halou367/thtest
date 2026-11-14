@@ -12,7 +12,9 @@
     fastHash,
     extractRenderableCode,
     isCompleteSpecimenCode,
+    isAiOrPreviewHost,
     matchKeywordFeatures,
+    isAutoTriggerSpecimen,
     extractSanitizedSvgMarkup,
     splitToShortVendorAndModel,
     getModelsForVendor,
@@ -39,7 +41,7 @@
   let activeConfig = {
     autoPopup: true,
     autoPageCapture: true,
-    keywordOnlyAuto: true,
+    keywordOnlyAuto: false,
     captureKeywords: DEFAULT_CAPTURE_KEYWORDS,
     sourceFilter: "all"
   };
@@ -172,10 +174,74 @@
     return true;
   }
 
+  function getNearbyContextHint(el) {
+    const parts = [];
+    if (document.title) parts.push(document.title.slice(0, 160));
+    if (el && typeof el.closest === "function") {
+      const box = el.closest("article, figure, [data-message-author-role], [class*='message'], [class*='turn'], [class*='chat']");
+      if (box) {
+        // Grab heading / paragraph prompt text without pulling huge <pre>/<code>/<svg> strings
+        const textEls = box.querySelectorAll("h1, h2, h3, h4, p, figcaption, summary");
+        for (let i = 0; i < Math.min(textEls.length, 6); i++) {
+          const t = (textEls[i].textContent || "").trim();
+          if (t && t.length <= 300) parts.push(t);
+        }
+      }
+      if (el.previousElementSibling) {
+        const prevTxt = (el.previousElementSibling.textContent || "").trim();
+        if (prevTxt && prevTxt.length <= 300) parts.push(prevTxt);
+      }
+    }
+    return parts.join(" \n ").slice(0, 1200);
+  }
+
   // Scan the current DOM + iframes + code blocks for SVG / HTML specimens and score by keyword features
   function scanPageSpecimens(opts = {}) {
     const requireComplete = Boolean(opts.requireComplete);
+    const isAiHost = isAiOrPreviewHost(location.hostname) || location.protocol === "file:";
     const rawCandidates = [];
+
+    // 0. Standalone local file (file:///*.html or *.svg) or direct SVG document opened in Chrome
+    if (
+      (location.protocol === "file:" || document.contentType === "image/svg+xml") &&
+      document.documentElement
+    ) {
+      if (document.documentElement.tagName.toLowerCase() === "svg") {
+        const svgDoc = document.documentElement.outerHTML || "";
+        if (svgDoc.length >= 80 && svgDoc.length <= 2800000) {
+          rawCandidates.push({
+            type: "SVG",
+            code: svgDoc,
+            origin: "本地文档",
+            contextHint: document.title || location.pathname
+          });
+        }
+      } else {
+        const ownSvgs = document.querySelectorAll("svg");
+        const ownCanvas = document.querySelectorAll("canvas");
+        let totalShapes = 0;
+        for (let i = 0; i < ownSvgs.length; i++) {
+          if (hostEl && hostEl.contains(ownSvgs[i])) continue;
+          totalShapes += ownSvgs[i].querySelectorAll("path,circle,ellipse,rect,line,polygon,polyline").length;
+        }
+        if (totalShapes >= 4 || ownCanvas.length > 0) {
+          const cleanHtml =
+            "<!DOCTYPE html>\n" +
+            document.documentElement.outerHTML.replace(
+              /<div id="__pelican_model_id_ext_host__"><\/div>/g,
+              ""
+            );
+          if (!cleanHtml.includes("__tihu_fit_css") && cleanHtml.length <= 3000000) {
+            rawCandidates.push({
+              type: "HTML",
+              code: cleanHtml,
+              origin: "本地文档",
+              contextHint: document.title || location.pathname
+            });
+          }
+        }
+      }
+    }
 
     // 1. iframe[srcdoc] & accessible blob/about preview iframes (Arena / Claude / DeepSeek preview panes!)
     const iframes = document.querySelectorAll("iframe");
@@ -186,7 +252,12 @@
       if (srcdoc && srcdoc.length >= 60) {
         const parsed = extractRenderableCode(srcdoc);
         if (parsed && (!requireComplete || isCompleteSpecimenCode(parsed))) {
-          rawCandidates.push({ type: parsed.type, code: parsed.code, origin: "预览框" });
+          rawCandidates.push({
+            type: parsed.type,
+            code: parsed.code,
+            origin: "预览框",
+            contextHint: getNearbyContextHint(f)
+          });
         }
         continue;
       }
@@ -202,7 +273,12 @@
               if (!htmlStr.includes("__tihu_fit_css")) {
                 const parsed = extractRenderableCode(htmlStr);
                 if (parsed && (!requireComplete || isCompleteSpecimenCode(parsed))) {
-                  rawCandidates.push({ type: parsed.type, code: parsed.code, origin: "内嵌帧" });
+                  rawCandidates.push({
+                    type: parsed.type,
+                    code: parsed.code,
+                    origin: "内嵌帧",
+                    contextHint: getNearbyContextHint(f)
+                  });
                 }
               }
             }
@@ -217,6 +293,7 @@
     for (let i = 0; i < codeEls.length; i++) {
       const el = codeEls[i];
       if (hostEl && hostEl.contains(el)) continue;
+      if (requireComplete && el.tagName === "TEXTAREA" && document.activeElement === el) continue;
       if (el.tagName === "PRE" && visitedPre.has(el)) continue;
       if (el.tagName === "CODE" && el.parentElement && el.parentElement.tagName === "PRE") {
         visitedPre.add(el.parentElement);
@@ -228,13 +305,23 @@
 
       const parsed = extractRenderableCode(txt);
       if (parsed && (!requireComplete || isCompleteSpecimenCode(parsed))) {
-        rawCandidates.push({ type: parsed.type, code: parsed.code, origin: "代码块" });
+        rawCandidates.push({
+          type: parsed.type,
+          code: parsed.code,
+          origin: "代码块",
+          contextHint: getNearbyContextHint(el)
+        });
       }
     }
 
     // 3. Subframe reported specimens (cross-origin sandbox preview frames)
     for (const item of subframeSpecimensMap.values()) {
-      rawCandidates.push({ type: item.type, code: item.code, origin: item.origin });
+      rawCandidates.push({
+        type: item.type,
+        code: item.code,
+        origin: item.origin,
+        contextHint: isAiHost ? document.title || "" : ""
+      });
     }
 
     // 4. Standalone rendered <svg> illustrations in page DOM
@@ -247,7 +334,13 @@
       if (!/\bxmlns\s*=/i.test(markup)) {
         markup = markup.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
       }
-      rawCandidates.push({ type: "SVG", code: markup, origin: "页面SVG" });
+      rawCandidates.push({
+        type: "SVG",
+        code: markup,
+        origin: "页面SVG",
+        // Only apply nearby chat prompt context on AI hosts so ordinary news articles never cause false hits on site logos
+        contextHint: isAiHost ? getNearbyContextHint(s) : ""
+      });
     }
 
     // Deduplicate by exact hash AND suppress standalone SVG if already embedded inside a captured full HTML
@@ -258,7 +351,7 @@
       const h = fastHash(c.code);
       if (byHash.has(h)) continue;
       if (c.type === "HTML") htmlCodes.push(c.code);
-      const kw = matchKeywordFeatures(c.code, activeConfig.captureKeywords);
+      const kw = matchKeywordFeatures(c.code, activeConfig.captureKeywords, c.contextHint || "");
       byHash.set(h, {
         hash: h,
         type: c.type,
@@ -267,6 +360,7 @@
         kwHit: kw.hit,
         matchedKws: kw.matched,
         shapeCount: kw.shapeCount,
+        hasCanvas: kw.hasCanvas,
         score: kw.score + (c.type === "HTML" ? 15 : 0)
       });
     }
@@ -281,7 +375,7 @@
       deduped.push(item);
     }
 
-    // Sort: keyword-matched specimens FIRST, then by keyword score & size
+    // Sort: keyword-matched specimens FIRST, then by keyword/visual score & size
     deduped.sort((a, b) => {
       if (a.kwHit !== b.kwHit) return a.kwHit ? -1 : 1;
       if (b.score !== a.score) return b.score - a.score;
@@ -309,9 +403,13 @@
     const allFound = scanPageSpecimens({ requireComplete: true });
     if (!allFound.length) return;
 
-    const eligible = activeConfig.keywordOnlyAuto
-      ? allFound.filter((x) => x.kwHit)
-      : allFound.filter((x) => x.kwHit || x.origin !== "页面SVG" || x.shapeCount >= 14);
+    const isAiHost = isAiOrPreviewHost(location.hostname) || location.protocol === "file:";
+    const eligible = allFound.filter((x) =>
+      isAutoTriggerSpecimen(x, {
+        keywordOnlyAuto: Boolean(activeConfig.keywordOnlyAuto),
+        isAiHost
+      })
+    );
 
     if (!eligible.length) {
       // Still update header badge count quietly if UI already exists
@@ -1105,10 +1203,10 @@
                 <input id="chkAutoPage" type="checkbox" checked />
               </div>
               <div class="chk-line">
-                <label for="chkKwOnly" style="cursor:pointer;">自动弹出仅限命中关键词特征</label>
-                <input id="chkKwOnly" type="checkbox" checked />
+                <label for="chkKwOnly" style="cursor:pointer;">仅命中特征词才自动弹出（默认关闭=全捕获）</label>
+                <input id="chkKwOnly" type="checkbox" />
               </div>
-              <textarea class="kw-textarea" id="inpCaptureKws" spellcheck="false" placeholder="逗号分隔关键词，如：鹈鹕, pelican, 自行车, bicycle..."></textarea>
+              <textarea class="kw-textarea" id="inpCaptureKws" spellcheck="false" placeholder="逗号分隔特征词，如：鹈鹕, 大嘴鸟, 白鸽, 摩托车, 自行车, toucan, dove, motorcycle..."></textarea>
               <div style="display:flex;justify-content:flex-end;gap:6px;">
                 <button type="button" class="submit-ingest-btn" id="btnSaveKwAndScan" style="background:#24466b;">保存并扫描本页</button>
               </div>
@@ -1230,7 +1328,7 @@
   function syncKwDrawerUI() {
     if (!shadow) return;
     shadow.getElementById("chkAutoPage").checked = activeConfig.autoPageCapture !== false;
-    shadow.getElementById("chkKwOnly").checked = activeConfig.keywordOnlyAuto !== false;
+    shadow.getElementById("chkKwOnly").checked = Boolean(activeConfig.keywordOnlyAuto);
     shadow.getElementById("inpCaptureKws").value = activeConfig.captureKeywords || DEFAULT_CAPTURE_KEYWORDS;
   }
 

@@ -7,9 +7,22 @@
   const TIER_CN = { low: "低 Low", medium: "中 Med", high: "高 High", max: "极高 Max" };
   const TIER_SHORT = { low: "LOW", medium: "MED", high: "HIGH", max: "MAX" };
 
-  // Default high-signal keyword signatures for auto-capturing SVG / HTML specimens on webpages
-  const DEFAULT_CAPTURE_KEYWORDS =
-    "鹈鹕, pelican, 自行车, 单车, 骑行, bicycle, bike, cyclist, 喉囊, pouch, gular, beak, 鸟喙, pedal, 脚踏, handlebar, 车把, wheel, 车轮, spoke, 辐条, saddle, 车座, crank, 翅膀, wing, feather";
+  // Multi-subject visual benchmark keyword signatures (Pelican, Toucan, White Dove, Motorcycle, Bicycle, Birds/Animals + Vehicles/Anatomy)
+  const DEFAULT_CAPTURE_KEYWORDS = [
+    // 核心鸟类与动物主体
+    "鹈鹕, pelican, 大嘴鸟, 巨嘴鸟, 鵎鵼, toucan, 白鸽, 和平鸽, 鸽子, 信鸽, dove, pigeon",
+    "火烈鸟, flamingo, 企鹅, penguin, 猫头鹰, owl, 鹦鹉, parrot, 天鹅, swan, 仙鹤, crane, 海鸥, seagull, 孔雀, peacock, 蜂鸟, hummingbird, 鸵鸟, ostrich, 飞鸟, 小鸟, bird",
+    "猫咪, 熊猫, panda, 狐狸, 青蛙, 章鱼, 宇航员, astronaut, 机器人, robot, 恐龙, 飞龙, dragon",
+    // 摩托车、自行车与各类骑行载具
+    "摩托车, 机车, 重机, 铁骑, 电摩, 踏板车, 小绵羊, motorcycle, motorbike, moto, scooter, vespa, chopper, cruiser",
+    "自行车, 单车, 骑行, 骑车, 骑着, bicycle, bike, cyclist, riding, 三轮车, tricycle, 滑板, skateboard, 跑车, 赛车, 卡丁车",
+    // 高频生物解剖与机械部件特征（即使代码未写动物全名也能精准命中）
+    "喉囊, pouch, gular, 鸟喙, 巨喙, 大嘴, beak, bill, 橄榄枝, olive, 翅膀, 羽翼, wing, 羽毛, 尾羽, feather, plumage",
+    "头盔, 风镜, helmet, visor, 排气管, 尾气, exhaust, muffler, 引擎, 发动机, 气缸, engine, motor, 油箱, 车灯, 大灯, headlight, taillight",
+    "挡泥板, fender, 油门, throttle, 脚踏, 踏板, pedal, 车把, 把手, handlebar, 车轮, 轮胎, 前轮, 后轮, wheel, tire, tyre, 辐条, 轮毂, spoke, rim, 车座, 坐垫, saddle, 链条, 曲柄, crank, chain"
+  ].join(", ");
+
+  const AI_OR_PREVIEW_HOST_RE = /(?:^|\.)(arena\.ai|lmarena\.ai|lmsys\.org|chatgpt\.com|openai\.com|claude\.ai|claudeusercontent\.com|gemini\.google\.com|usercontent\.goog|aistudio\.google\.com|deepseek\.com|kimi\.com|moonshot\.cn|qwen\.ai|aliyun\.com|doubao\.com|grok\.com|x\.com|poe\.com|chatglm\.cn|zhipuai\.cn|yuanbao\.tencent\.com|baidu\.com|minimaxi\.com|hailuoai\.com|mistral\.ai|huggingface\.co|e2b\.app|webcontainer\.io|bolt\.new|v0\.dev|localhost|127\.0\.0\.1)$/i;
 
   // Aligned with th.629717.cc.cd 3-level Vendor -> Short Model catalog
   const SHORT_VENDOR_CATALOG = [
@@ -156,24 +169,49 @@
     return Array.from(new Set(parts));
   }
 
+  function mergeWithDefaultKeywords(existingRaw) {
+    const userList = parseKeywordsList(existingRaw || "");
+    const defList = parseKeywordsList(DEFAULT_CAPTURE_KEYWORDS);
+    const seen = new Set(userList.map((x) => x.toLowerCase()));
+    for (let i = 0; i < defList.length; i++) {
+      const k = defList[i];
+      if (!seen.has(k.toLowerCase())) {
+        seen.add(k.toLowerCase());
+        userList.push(k);
+      }
+    }
+    return userList.join(", ");
+  }
+
+  function isAiOrPreviewHost(hostname) {
+    if (!hostname) return false;
+    return AI_OR_PREVIEW_HOST_RE.test(String(hostname).trim());
+  }
+
   function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   // High-precision keyword signature matcher (camelCase & identifier boundary safe for English, direct for CJK)
-  function matchKeywordFeatures(code, keywordsRaw) {
-    if (!code || typeof code !== "string") {
-      return { hit: false, matched: [], score: 0 };
+  function matchKeywordFeatures(code, keywordsRaw, contextHint = "") {
+    if ((!code || typeof code !== "string") && !contextHint) {
+      return { hit: false, matched: [], shapeCount: 0, hasCanvas: false, score: 0 };
     }
     const list = Array.isArray(keywordsRaw) ? keywordsRaw : parseKeywordsList(keywordsRaw);
+    const safeCode = typeof code === "string" ? code : "";
+    const sample = safeCode.length > 250000 ? safeCode.slice(0, 250000) : safeCode;
+    const ctxSample = typeof contextHint === "string" && contextHint.length > 0 ? "\n" + contextHint.slice(0, 1600) : "";
+
+    const shapeMatches = sample.match(/<(path|circle|ellipse|rect|line|polygon|polyline|use)\b/gi);
+    const shapeCount = shapeMatches ? shapeMatches.length : 0;
+    const hasCanvas = /<canvas[\s>]/i.test(sample);
+
     if (!list.length) {
-      return { hit: false, matched: [], score: 0 };
+      return { hit: false, matched: [], shapeCount, hasCanvas, score: Math.min(80, shapeCount * 2) };
     }
 
-    // Scan up to 250KB to keep DOM scanning instantaneous even on huge bundles
-    const sample = code.length > 250000 ? code.slice(0, 250000) : code;
     // Split camelCase / PascalCase into space-separated words before lowercasing
-    const normalized = sample
+    const normalized = (sample + ctxSample)
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
       .toLowerCase();
@@ -186,7 +224,7 @@
       if (!normalized.includes(lowerKw)) continue;
 
       if (/^[a-z]+$/i.test(kw)) {
-        const wordRe = new RegExp(`(?:^|[^a-z])${escapeRegExp(lowerKw)}s?(?=$|[^a-z])`);
+        const wordRe = new RegExp(`(?:^|[^a-z])${escapeRegExp(lowerKw)}(?:s|es)?(?=$|[^a-z])`);
         if (wordRe.test(normalized)) {
           matched.push(kw);
         }
@@ -195,17 +233,44 @@
       }
     }
 
-    // Structural visual bonus (SVG primitives / Canvas / requestAnimationFrame)
-    const shapeMatches = sample.match(/<(path|circle|ellipse|rect|line|polygon|polyline|canvas)\b/gi);
-    const shapeCount = shapeMatches ? shapeMatches.length : 0;
-    const score = matched.length * 100 + Math.min(80, shapeCount * 2) + Math.min(30, Math.round(sample.length / 1024));
+    const score =
+      matched.length * 100 +
+      (hasCanvas ? 35 : 0) +
+      Math.min(80, shapeCount * 2) +
+      Math.min(30, Math.round(sample.length / 1024));
 
     return {
       hit: matched.length > 0,
       matched,
       shapeCount,
+      hasCanvas,
       score
     };
+  }
+
+  // Decide whether a captured page specimen should automatically pop up the identification panel
+  function isAutoTriggerSpecimen(item, opts = {}) {
+    if (!item || !item.code) return false;
+    if (opts.keywordOnlyAuto === true) {
+      return Boolean(item.kwHit);
+    }
+    // 1. Any specimen matching subject/anatomy/vehicle keywords triggers immediately
+    if (item.kwHit) return true;
+
+    // 2. Complete visual SVG / HTML artworks in code blocks, preview iframes, subframes, or local files trigger even without keywords!
+    if (/(预览|内嵌帧|子帧|代码块|本地文档)/.test(String(item.origin || ""))) {
+      if (item.hasCanvas) return true;
+      if ((item.shapeCount || 0) >= 4) return true;
+      if (/<svg[\s>]/i.test(item.code) && item.code.length >= 260) return true;
+      if (/(requestAnimationFrame|getContext\s*\(\s*['"](?:2d|webgl)|three\.|d3\.)/i.test(item.code)) return true;
+      return false;
+    }
+
+    // 3. Direct rendered inline <svg> in DOM: auto-trigger on AI chat / preview hosts if rich illustration
+    if (item.origin === "页面SVG" && opts.isAiHost && (item.shapeCount || 0) >= 8) {
+      return true;
+    }
+    return false;
   }
 
   // Extract largest sanitized static <svg> from SVG or HTML for instant zero-flash / CSP-resilient fallback
@@ -518,7 +583,10 @@
     extractRenderableCode,
     isCompleteSpecimenCode,
     parseKeywordsList,
+    mergeWithDefaultKeywords,
+    isAiOrPreviewHost,
     matchKeywordFeatures,
+    isAutoTriggerSpecimen,
     extractSanitizedSvgMarkup,
     isModelOpenSource,
     inferShortVendor,

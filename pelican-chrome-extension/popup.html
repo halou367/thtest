@@ -450,7 +450,7 @@
   <!-- Tab 1: Result -->
   <div class="view active" id="view-result">
     <div id="emptyState" class="empty-box">
-      打开含有鹈鹕单车等特征代码的网页将自动捕获；<br/>
+      网页出现鹈鹕、大嘴鸟、白鸽、摩托车等 SVG/HTML 绘图代码将自动触发识别；<br/>
       也可点击右上角 <strong>🔍 抓本页</strong> 或 <strong>📋 剪贴板</strong> 立即鉴定。
     </div>
 
@@ -531,12 +531,12 @@
   <!-- Tab 3: Settings -->
   <div class="view" id="view-settings">
     <div class="switch-row">
-      <span><strong>自动捕获网页 SVG/HTML 代码</strong></span>
+      <span><strong>自动捕获网页 SVG/HTML 绘图代码</strong></span>
       <input type="checkbox" id="cfgAutoPageCapture" checked />
     </div>
     <div class="switch-row">
-      <span>自动弹出仅限命中<strong>关键词特征</strong></span>
-      <input type="checkbox" id="cfgKeywordOnlyAuto" checked />
+      <span>仅限命中<strong>关键词特征</strong>才自动弹出（默认关闭=全捕获）</span>
+      <input type="checkbox" id="cfgKeywordOnlyAuto" />
     </div>
     <div class="switch-row">
       <span>复制代码时自动弹出网页鉴定窗</span>

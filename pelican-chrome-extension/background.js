@@ -6,10 +6,13 @@ const {
   DEFAULT_CAPTURE_KEYWORDS,
   TIER_ORDER,
   extractRenderableCode,
+  mergeWithDefaultKeywords,
   fastHash,
   isModelOpenSource,
   inferShortVendor
 } = globalThis.PelicanShared;
+
+const CURRENT_CONFIG_VERSION = 2;
 
 const STORAGE_KEYS = {
   CONFIG: "pelican_ext_config_v1",
@@ -29,18 +32,30 @@ function sleep(ms) {
 async function getConfig() {
   const data = await chrome.storage.local.get(STORAGE_KEYS.CONFIG);
   const cfg = data[STORAGE_KEYS.CONFIG] || {};
-  return {
+  const needsMigration = (Number(cfg.configVersion) || 0) < CURRENT_CONFIG_VERSION;
+
+  const normalized = {
+    configVersion: CURRENT_CONFIG_VERSION,
     apiBase: String(cfg.apiBase || DEFAULT_API_BASE).replace(/\/+$/, ""),
     apiKey: String(cfg.apiKey || DEFAULT_API_KEY),
     autoPopup: cfg.autoPopup !== false,
     autoPageCapture: cfg.autoPageCapture !== false,
-    keywordOnlyAuto: cfg.keywordOnlyAuto !== false,
-    captureKeywords:
-      typeof cfg.captureKeywords === "string" && cfg.captureKeywords.trim().length > 0
-        ? cfg.captureKeywords
-        : DEFAULT_CAPTURE_KEYWORDS,
+    // v1.3.1+: default false so ALL visual SVG/HTML artworks (toucan, white dove, motorcycle, pelican, etc.) trigger automatically, while keyword hits get prioritized & badged
+    keywordOnlyAuto: needsMigration ? false : Boolean(cfg.keywordOnlyAuto),
+    captureKeywords: needsMigration
+      ? mergeWithDefaultKeywords(cfg.captureKeywords)
+      : typeof cfg.captureKeywords === "string" && cfg.captureKeywords.trim().length > 0
+      ? cfg.captureKeywords
+      : DEFAULT_CAPTURE_KEYWORDS,
     sourceFilter: cfg.sourceFilter || "all"
   };
+
+  if (needsMigration) {
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEYS.CONFIG]: normalized });
+    } catch (_) {}
+  }
+  return normalized;
 }
 
 async function getLastFocusHash() {

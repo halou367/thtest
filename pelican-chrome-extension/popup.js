@@ -558,7 +558,7 @@
       captureKeywordsStr = st.config.captureKeywords || DEFAULT_CAPTURE_KEYWORDS;
       syncPills();
       document.getElementById("cfgAutoPageCapture").checked = st.config.autoPageCapture !== false;
-      document.getElementById("cfgKeywordOnlyAuto").checked = st.config.keywordOnlyAuto !== false;
+      document.getElementById("cfgKeywordOnlyAuto").checked = Boolean(st.config.keywordOnlyAuto);
       document.getElementById("cfgAutoPopup").checked = st.config.autoPopup !== false;
       document.getElementById("cfgCaptureKeywords").value = captureKeywordsStr;
       document.getElementById("cfgApiBase").value = st.config.apiBase || "https://th.629717.cc.cd";

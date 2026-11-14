@@ -63,17 +63,17 @@
       for (let i = 0; i < svgs.length; i++) {
         bigSvgShapes += svgs[i].querySelectorAll("path,circle,ellipse,rect,line,polygon,polyline").length;
       }
-      const hasVisualStage = bigSvgShapes >= 6 || canvases.length > 0;
+      const hasVisualStage = bigSvgShapes >= 4 || canvases.length > 0;
       if (hasVisualStage) {
-        const docHtml = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
-        // Strip Pelican's own autofit helper if somehow present
-        if (!docHtml.includes("__tihu_fit_css") && docHtml.length >= 80 && docHtml.length <= 2500000) {
-          // If document body only wraps a single static SVG without scripts, report clean SVG
-          const scripts = document.querySelectorAll("script");
-          if (svgs.length === 1 && scripts.length === 0 && canvases.length === 0) {
-            found.push({ type: "SVG", code: svgs[0].outerHTML, origin: "预览子帧 SVG" });
-          } else {
-            found.push({ type: "HTML", code: docHtml, origin: "预览子帧 HTML" });
+        if (document.documentElement.tagName.toLowerCase() === "svg") {
+          const svgOut = document.documentElement.outerHTML;
+          if (svgOut.length >= 80 && svgOut.length <= 2500000) {
+            found.push({ type: "SVG", code: svgOut, origin: "子帧SVG" });
+          }
+        } else {
+          const docHtml = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+          if (!docHtml.includes("__tihu_fit_css") && docHtml.length >= 80 && docHtml.length <= 2500000) {
+            found.push({ type: "HTML", code: docHtml, origin: "子帧预览" });
           }
         }
       }
