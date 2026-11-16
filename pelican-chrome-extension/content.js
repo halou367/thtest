@@ -1072,7 +1072,6 @@
     .verdict-actions {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 6px;
       margin-top: 8px;
       padding-top: 8px;
@@ -1272,7 +1271,7 @@
     }
     .cand-row {
       display: grid;
-      grid-template-columns: 18px 1fr auto;
+      grid-template-columns: 1fr auto;
       align-items: center;
       gap: 6px;
       padding: 3px 2px;
@@ -1280,11 +1279,10 @@
       cursor: pointer;
     }
     .cand-row:hover { background: #f4f7fb; }
-    .cand-name { font-size: 11px; font-weight: 650; color: var(--ink); display: flex; align-items: center; gap: 4px; }
+    .cand-name { font-size: 11px; font-weight: 650; color: var(--ink); }
     .prob-track { height: 4px; border-radius: 999px; background: #e6ecf3; overflow: hidden; margin-top: 2px; }
     .prob-fill { height: 100%; border-radius: 999px; background: #5a738e; }
     .cand-pct { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); }
-    .vlogo { display: inline-grid; place-items: center; flex-shrink: 0; }
 
     .minimized-fab {
       display: none;
@@ -1395,10 +1393,25 @@
               </div>
               <div class="verdict-actions">
                 <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">纠正 / 入库</button>
+                <button class="act-btn" id="btnToggleDetails" type="button">详情 ▾</button>
               </div>
             </div>
 
             <div class="toast-inline" id="inlineToast"></div>
+
+            <!-- 详情展开：强度概率 + Top-5 候选（v1.5.1 恢复，极简中性样式） -->
+            <div class="drawer-card" id="detailsDrawer">
+              <div class="drawer-lbl">
+                <span>推理强度</span>
+                <span id="effortSummaryLbl">--</span>
+              </div>
+              <div class="tier-mini-bar" id="tierGrid"></div>
+              <div class="drawer-lbl" style="margin-top:3px;">
+                <span>候选模型</span>
+                <span style="font-weight:500;">点击带入纠错</span>
+              </div>
+              <div id="candBars"></div>
+            </div>
 
             <div class="drawer-card" id="correctDrawer">
               <div class="form-grid-2">
@@ -1602,7 +1615,23 @@
       executeManualPageScanAndOpen();
     });
 
-    // Toggle Keyword Config Drawer
+    // Toggle Correction Drawer
+    const btnCorrect = shadow.getElementById("btnToggleCorrect");
+    btnCorrect.addEventListener("click", () => {
+      uiState.correctOpen = !uiState.correctOpen;
+      shadow.getElementById("correctDrawer").classList.toggle("open", uiState.correctOpen);
+      btnCorrect.classList.toggle("active", uiState.correctOpen);
+    });
+
+    // Toggle Details Drawer (v1.5.1 恢复：强度概率 + Top-5 候选)
+    const btnDetails = shadow.getElementById("btnToggleDetails");
+    btnDetails.addEventListener("click", () => {
+      uiState.detailsOpen = !uiState.detailsOpen;
+      shadow.getElementById("detailsDrawer").classList.toggle("open", uiState.detailsOpen);
+      btnDetails.classList.toggle("active", uiState.detailsOpen);
+      btnDetails.textContent = uiState.detailsOpen ? "收起 ▴" : "详情 ▾";
+    });
+
     // Vendor / Model / Tier controls
     shadow.getElementById("corrVendorSelect").addEventListener("change", (e) => {
       const models = getModelsForVendor(e.target.value, uiState.currentVerdict?.allModels);
@@ -1745,6 +1774,40 @@
     uiState.detectedModel = detSplit.shortModel;
     uiState.detectedTier = tierKey;
     applyCorrectionSelection(activeTop.vendor, activeTop.label, tierKey);
+
+    // 详情展开：强度概率 + Top-5 候选（点击候选带入纠错）
+    const tierMap = {};
+    (res.tierProbabilities || []).forEach((tp) => { tierMap[tp.tier] = tp.probability; });
+    const effConf = res.effortConfidence ?? tierMap[tierKey] ?? 0;
+    shadow.getElementById("effortSummaryLbl").textContent = `${tierStr} (${Math.round(effConf * 100)}%)`;
+    shadow.getElementById("tierGrid").innerHTML = TIER_ORDER.map((t) => {
+      const p = (tierMap[t] || 0) * 100;
+      return `<div class="tier-mini-cell ${t === tierKey ? "active" : ""}">${TIER_SHORT[t]} ${p.toFixed(0)}%</div>`;
+    }).join("");
+
+    const top5 = filtered.slice(0, 5);
+    shadow.getElementById("candBars").innerHTML = top5
+      .map((m, idx) => {
+        const pct = Math.min(100, Math.max(0, (Number(m.probability) || 0) * 100));
+        return `<div class="cand-row" data-pick-top="${idx}" title="点击将该模型填入纠错栏">
+          <div>
+            <div class="cand-name">${escapeHtml(m.label)}</div>
+            <div class="prob-track"><div class="prob-fill" style="width:${pct.toFixed(1)}%;"></div></div>
+          </div>
+          <div class="cand-pct">${pct.toFixed(1)}%</div>
+        </div>`;
+      })
+      .join("");
+    shadow.querySelectorAll("[data-pick-top]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const picked = top5[Number(row.dataset.pickTop)];
+        if (!picked) return;
+        uiState.correctOpen = true;
+        shadow.getElementById("correctDrawer").classList.add("open");
+        shadow.getElementById("btnToggleCorrect").classList.add("active");
+        applyCorrectionSelection(picked.vendor, picked.label, uiState.corrTier);
+      });
+    });
 
     shadow.getElementById("fabText").textContent = `${activeTop.label} · ${probPct}%`;
   }
