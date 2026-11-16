@@ -362,30 +362,11 @@
     document.getElementById("heroTitle").textContent = activeTop.label;
     document.getElementById("confPct").textContent = `${probPct}%`;
 
-    const badges = [];
-    if (rarity === "gold") badges.push(`<span class="tag gold">🥇 #${rank || 1}</span>`);
-    else if (rarity === "silver") badges.push(`<span class="tag silver">🥈 #${rank || 4}</span>`);
-    badges.push(`<span class="tag ${activeTop.isOpen ? "open" : "closed"}">${activeTop.isOpen ? "开源" : "闭源"}</span>`);
-    // Arena v1.4.0: open-thinking marker emphasis
-    if (currentOpenThinking && currentOpenThinking.detected) {
-      badges.push(
-        `<span class="tag open-thinking" title="Arena 开源思考标记: ${escapeHtml(currentOpenThinking.label || "Thought")}">🧠 开源思考 · ${escapeHtml(currentOpenThinking.label || "Thought")}</span>`
-      );
-    }
-    badges.push(`<span class="tag tier">强度 ${tierStr}</span>`);
-    if (currentMatchedKws && currentMatchedKws.length > 0) {
-      const kwBrief = currentMatchedKws.slice(0, 2).join("·");
-      const kwMore = currentMatchedKws.length > 2 ? `+${currentMatchedKws.length - 2}` : "";
-      badges.push(
-        `<span class="tag kw" title="命中关键词特征: ${escapeHtml(currentMatchedKws.join(", "))}">🎯 ${escapeHtml(kwBrief + kwMore)}</span>`
-      );
-    }
-    if (currentVerdict.userIngested) {
-      badges.push(`<span class="tag ingested">✓ 已${currentVerdict.userIngested.isCorrection ? "纠错" : "归档"}入库</span>`);
-    } else if (exactHit && activeTop.id === overallTop.id) {
-      badges.push(`<span class="tag ingested">馆藏命中</span>`);
-    }
-    document.getElementById("heroBadges").innerHTML = badges.join("");
+    // v1.5.0 极简：只留一行小字，无彩色徽章
+    let sub = `${activeTop.isOpen ? "开源" : "闭源"} · ${tierStr}`;
+    if (currentVerdict.userIngested) sub += ` · 已${currentVerdict.userIngested.isCorrection ? "纠错" : "归档"}入库`;
+    else if (exactHit && activeTop.id === overallTop.id) sub += " · 馆藏命中";
+    document.getElementById("heroBadges").innerHTML = `<span class="hero-sub">${escapeHtml(sub)}</span>`;
 
     const detSplit = splitToShortVendorAndModel(activeTop.vendor, activeTop.label);
     detectedVendor = detSplit.shortVendor;

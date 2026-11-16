@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "鹈鹕实验室 · 剪贴板与页面模型鉴定助手",
   "short_name": "鹈鹕鉴定",
-  "version": "1.4.0",
-  "description": "Arena.ai 专项优化：自动恢复最新一轮对话折叠预览小窗中的大 SVG/HTML 代码（blob 预览捕获 + React Fiber 恢复），识别开源思考标记并强调开源模型结果；同时覆盖鹈鹕、大嘴鸟、白鸽、摩托车、单车等多主题特征及无标签纯几何作品，极简悬浮预览鉴定并支持一键纠正入库。",
+  "version": "1.5.0",
+  "description": "极简悬浮鉴定：只显示当前页最近 2 个 SVG/HTML 样本（换页即清空），预览 + 模型 + 概率 + 开源/闭源·强度 + 纠正入库，无多余徽章与抽屉。",
   "permissions": [
     "storage",
     "clipboardRead",
@@ -35,8 +35,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["clipboard-hook.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "clipboard-hook.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true,
@@ -44,22 +48,34 @@
       "world": "MAIN"
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["shared.js", "page-capture-frame.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "shared.js",
+        "page-capture-frame.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true,
       "match_origin_as_fallback": true
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["shared.js", "content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "shared.js",
+        "content.js"
+      ],
       "run_at": "document_end",
       "all_frames": false
     }
   ],
   "sandbox": {
-    "pages": ["sandbox-preview.html"]
+    "pages": [
+      "sandbox-preview.html"
+    ]
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self';",
@@ -67,8 +83,13 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["sandbox-preview.html", "icons/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "sandbox-preview.html",
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "commands": {

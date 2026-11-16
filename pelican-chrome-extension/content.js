@@ -56,9 +56,39 @@
   let fiberReqSeq = 0;
   let arenaBlobDebounceTimer = null;
   let lastArenaOpenThinking = null;
-  let lastObservedHref = location.href;
+  // v1.5.0 极简：每页最多保留最近 2 个样本；换页（href 去 hash 变化）立即清空，绝不残留历史页样本
+  const MAX_PAGE_SPECIMENS = 2;
+  const pageKeyOf = (href) => String(href || "").split("#")[0];
+  let lastObservedHref = pageKeyOf(location.href);
   let domSettleTimer = null;
   let lastMutationBurstTs = 0;
+
+  function clearPageState(hideWindow = true) {
+    autoCapturedPageHashes.clear();
+    subframeSpecimensMap.clear();
+    arenaBlobSpecimensMap.clear();
+    arenaFiberSpecimensMap.clear();
+    lastArenaOpenThinking = null;
+    lastTriggerHash = "";
+    lastTriggerTs = 0;
+    uiState.pageSpecimens = [];
+    uiState.currentCode = "";
+    uiState.currentHash = "";
+    uiState.currentVerdict = null;
+    uiState.currentMatchedKws = [];
+    uiState.currentOrigin = "";
+    uiState.visible = false;
+    uiState.minimized = false;
+    if (shadow) {
+      renderPageSpecimensBar();
+      if (hideWindow) {
+        const win = shadow.getElementById("extWin");
+        const fab = shadow.getElementById("minimizedFab");
+        if (win) win.classList.remove("show");
+        if (fab) fab.classList.remove("show");
+      }
+    }
+  }
 
   const uiState = {
     visible: false,
@@ -128,7 +158,8 @@
           hash: h,
           type: parsed.type,
           code: parsed.code,
-          origin: it.origin || "子帧预览"
+          origin: it.origin || "子帧预览",
+          ts: Date.now()
         });
       });
       if (addedNew && !d.manualScan) {
@@ -146,7 +177,8 @@
           type: parsed.type,
           code: parsed.code,
           origin: "对话预览小窗",
-          blobUrl: d.blobUrl || ""
+          blobUrl: d.blobUrl || "",
+          ts: Date.now()
         });
         if (arenaBlobDebounceTimer) clearTimeout(arenaBlobDebounceTimer);
         arenaBlobDebounceTimer = setTimeout(() => schedulePageAutoCapture(250), 350);
@@ -268,7 +300,8 @@
         type: parsed.type,
         code: parsed.code,
         origin: it.origin || "对话预览小窗",
-        msgId: it.msgId || ""
+        msgId: it.msgId || "",
+        ts: Date.now()
       });
       out.push(arenaFiberSpecimensMap.get(h));
     }
@@ -452,6 +485,7 @@
         type: item.type,
         code: item.code,
         origin: item.origin,
+        ts: item.ts,
         contextHint: isAiHost ? document.title || "" : ""
       });
     }
@@ -462,6 +496,7 @@
         type: item.type,
         code: item.code,
         origin: item.origin,
+        ts: item.ts,
         contextHint: isAiHost ? document.title || "" : ""
       });
     }
@@ -472,6 +507,7 @@
         type: item.type,
         code: item.code,
         origin: item.origin,
+        ts: item.ts,
         contextHint: isAiHost ? document.title || "" : ""
       });
     }
@@ -496,6 +532,8 @@
     }
 
     // Deduplicate by exact hash AND suppress standalone SVG if already embedded inside a captured full HTML
+    // v1.5.0: 只保留当前页样本，按最近优先（ts 倒序），最多 2 个
+    const nowTs = Date.now();
     const byHash = new Map();
     const htmlCodes = [];
     for (let i = 0; i < rawCandidates.length; i++) {
@@ -509,6 +547,7 @@
         type: c.type,
         code: c.code,
         origin: c.origin,
+        ts: c.ts || nowTs,
         kwHit: kw.hit,
         matchedKws: kw.matched,
         shapeCount: kw.shapeCount,
@@ -527,26 +566,24 @@
       deduped.push(item);
     }
 
-    // Sort: keyword-matched specimens FIRST, then by keyword/visual score & size
+    // v1.5.0: 最近优先（ts 倒序），同批内关键词命中优先；只返回最多 2 个
     deduped.sort((a, b) => {
+      if (b.ts !== a.ts) return b.ts - a.ts;
       if (a.kwHit !== b.kwHit) return a.kwHit ? -1 : 1;
       if (b.score !== a.score) return b.score - a.score;
       return b.code.length - a.code.length;
     });
 
-    return deduped.slice(0, 12);
+    return deduped.slice(0, MAX_PAGE_SPECIMENS);
   }
 
   function schedulePageAutoCapture(delayMs = 950) {
-    if (!activeConfig.autoPageCapture) return;
-    if (location.href !== lastObservedHref) {
-      lastObservedHref = location.href;
-      autoCapturedPageHashes.clear();
-      subframeSpecimensMap.clear();
-      arenaBlobSpecimensMap.clear();
-      arenaFiberSpecimensMap.clear();
-      lastArenaOpenThinking = null;
+    const pk = pageKeyOf(location.href);
+    if (pk !== lastObservedHref) {
+      lastObservedHref = pk;
+      clearPageState(true);
     }
+    if (!activeConfig.autoPageCapture) return;
     if (domSettleTimer) clearTimeout(domSettleTimer);
     domSettleTimer = setTimeout(() => {
       runAutoPageCaptureCheck();
@@ -642,6 +679,10 @@
     if (document.body) startObserver();
     else window.addEventListener("DOMContentLoaded", startObserver);
   }
+
+  // v1.5.0: SPA 换页（popstate / hash 变化）立即清空历史页样本
+  window.addEventListener("popstate", () => schedulePageAutoCapture(400));
+  window.addEventListener("hashchange", () => schedulePageAutoCapture(400));
 
   function deliverToSandbox(frameId, cid, code) {
     if (!shadow) return;
@@ -748,19 +789,18 @@
     .ext-window.show { display: flex; }
 
     .ext-header {
-      padding: 8px 10px;
+      padding: 6px 8px;
       background: rgba(241, 245, 250, 0.92);
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-end;
       gap: 5px;
       cursor: grab;
       user-select: none;
       flex-shrink: 0;
     }
     .ext-header:active { cursor: grabbing; }
-    .ext-header-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
 
     .brand-mark {
       width: 22px;
@@ -971,13 +1011,14 @@
       border: 1px solid var(--line-strong);
       box-shadow: 0 2px 8px rgba(15, 26, 40, 0.03);
     }
-    .verdict-card.rarity-gold {
-      background: linear-gradient(135deg, #fffcf2 0%, #f9efd8 100%);
-      border-color: rgba(196, 149, 69, 0.52);
-    }
-    .verdict-card.rarity-silver {
-      background: linear-gradient(135deg, #f9fbff 0%, #eaeff7 100%);
-      border-color: rgba(132, 152, 175, 0.54);
+    .hero-sub {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .verdict-main {
@@ -1018,21 +1059,7 @@
       margin-top: 3px;
       flex-wrap: wrap;
     }
-    .tag {
-      font-size: 9.8px;
-      font-weight: 700;
-      padding: 1px 5.5px;
-      border-radius: 5px;
-      white-space: nowrap;
-    }
-    .tag.open { background: var(--open-bg); color: var(--open-ink); }
-    .tag.closed { background: var(--closed-bg); color: var(--closed-ink); }
-    .tag.tier { background: rgba(31, 42, 55, 0.08); color: var(--ink); }
-    .tag.gold { background: rgba(196, 149, 69, 0.2); color: #7c581c; }
-    .tag.silver { background: rgba(120, 139, 161, 0.2); color: #3d4f63; }
-    .tag.ingested { background: rgba(16, 185, 129, 0.18); color: #0f5c41; }
-    .tag.kw { background: rgba(245, 158, 11, 0.16); color: #92400e; }
-    .tag.open-thinking { background: rgba(16, 185, 129, 0.22); color: #065f46; border: 1px solid rgba(16, 185, 129, 0.45); font-weight: 800; }
+
 
     .conf-num {
       font-size: 18px;
@@ -1334,111 +1361,50 @@
     shadow.innerHTML = `
       <style>${SHADOW_CSS}</style>
       <div class="pelican-root" id="pelicanRoot">
-        <div class="minimized-fab" id="minimizedFab" title="点击展开鹈鹕鉴定面板">
-          <div class="brand-mark">鹈</div>
-          <span id="fabText" style="font-size:11.8px;font-weight:720;color:#1f2a37;">已捕获代码 · 点击展开</span>
+        <div class="minimized-fab" id="minimizedFab" title="点击展开">
+          <span id="fabText" style="font-size:11.5px;font-weight:700;color:#1f2a37;">已捕获 · 点击展开</span>
         </div>
 
         <div class="ext-window" id="extWin">
-          <div class="ext-header" id="dragHandle" title="拖拽移动面板（双击复位右下角）">
-            <div class="ext-header-left">
-              <div class="brand-mark">鹈</div>
-              <span class="win-title">鹈鹕鉴定</span>
-              <span class="meta-chip" id="formatChip">就绪</span>
-            </div>
+          <div class="ext-header" id="dragHandle" title="拖拽移动（双击复位）">
             <div class="win-controls">
-              <span class="elapsed-lbl" id="elapsedLbl"></span>
-              <button class="head-pill-btn" id="btnScanPage" type="button" title="自动扫描并捕获本页全部 SVG / HTML 代码（关键词特征优先）">🔍 本页</button>
-              <button class="icon-btn" id="btnToggleKwCfg" type="button" title="页面自动捕获与关键词特征设置">🎯</button>
-              <button class="icon-btn" id="btnRefreshClip" type="button" title="强制重读系统剪贴板并刷新">↻</button>
+              <button class="head-pill-btn" id="btnScanPage" type="button" title="重新扫描当前页">本页</button>
               <button class="icon-btn" id="btnMinimize" type="button" title="最小化">—</button>
               <button class="icon-btn" id="btnClose" type="button" title="关闭">×</button>
             </div>
           </div>
 
           <div class="scroll-body">
-            <!-- 多样本切换条（仅在本页捕获到 >=2 份样本时自动显示，如 Arena 左右盲测对战） -->
+            <!-- v1.5.0: 最多 2 个当前页样本 -->
             <div class="specimens-bar" id="pageSpecimensBar"></div>
 
-            <!-- 关键词自动捕获快捷配置抽屉（点击右上角 🎯 展开） -->
-            <div class="drawer-card" id="kwConfigDrawer">
-              <div class="drawer-lbl">
-                <span>网页自动捕获与关键词特征</span>
-                <button type="button" class="quick-chip" id="btnResetKwDefault">恢复默认词</button>
-              </div>
-              <div class="chk-line">
-                <label for="chkAutoPage" style="cursor:pointer;">自动捕获页面生成的 SVG / HTML</label>
-                <input id="chkAutoPage" type="checkbox" checked />
-              </div>
-              <div class="chk-line">
-                <label for="chkKwOnly" style="cursor:pointer;">仅命中特征词才自动弹出（默认关闭=全捕获）</label>
-                <input id="chkKwOnly" type="checkbox" />
-              </div>
-              <textarea class="kw-textarea" id="inpCaptureKws" spellcheck="false" placeholder="逗号分隔特征词，如：鹈鹕, 大嘴鸟, 白鸽, 摩托车, 自行车, toucan, dove, motorcycle..."></textarea>
-              <div style="display:flex;justify-content:flex-end;gap:6px;">
-                <button type="button" class="submit-ingest-btn" id="btnSaveKwAndScan" style="background:#24466b;">保存并扫描本页</button>
-              </div>
-            </div>
-
-            <!-- 1. 纯净实时预览舞台 -->
             <div class="preview-stage-wrap">
               <div class="drag-shield"></div>
               <div class="svg-fallback-stage" id="svgFallbackStage"></div>
               <iframe id="previewFrame" title="SVG/HTML 实时预览"></iframe>
-              <button class="stage-corner-btn" id="btnOpenLb" type="button" title="放大全屏预览">⤢ 放大</button>
+              <button class="stage-corner-btn" id="btnOpenLb" type="button" title="放大全屏预览">放大</button>
             </div>
 
-            <!-- 2. 极简开源/闭源过滤条 -->
-            <div class="pill-group">
-              <button class="source-pill-btn active" data-filter="all" type="button">
-                <span>全部</span><span class="pill-pct" id="pctAll"></span>
-              </button>
-              <button class="source-pill-btn" data-filter="open" type="button">
-                <span>开源</span><span class="pill-pct" id="pctOpen">--%</span>
-              </button>
-              <button class="source-pill-btn" data-filter="closed" type="button">
-                <span>闭源</span><span class="pill-pct" id="pctClosed">--%</span>
-              </button>
-            </div>
-
-            <!-- 3. 合一精简鉴定结果卡 -->
             <div class="verdict-card" id="verdictCard">
               <div class="verdict-main">
-                <div class="verdict-left">
-                  <div class="logo-box" id="heroLogo"></div>
-                  <div style="min-width:0;">
-                    <div class="model-title" id="heroTitle">正在识别模型...</div>
-                    <div class="badge-row" id="heroBadges">
-                      <span class="tag closed">读取中</span>
-                    </div>
-                  </div>
+                <div style="min-width:0;">
+                  <div class="model-title" id="heroTitle">识别中...</div>
+                  <div class="hero-sub" id="heroSub"></div>
                 </div>
                 <div class="conf-num" id="confPct">--%</div>
               </div>
-
               <div class="verdict-actions">
-                <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">✎ 纠正 / 入库</button>
-                <button class="act-btn" id="btnToggleDetails" type="button">详情 ▾</button>
+                <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">纠正 / 入库</button>
               </div>
             </div>
 
             <div class="toast-inline" id="inlineToast"></div>
 
-            <!-- 4. 一键纠正 / 归档入库抽屉 -->
             <div class="drawer-card" id="correctDrawer">
-              <div class="drawer-lbl">
-                <span>点选候选或手动指定真实模型入库</span>
-                <span id="corrModeHint" style="color:#1f5f4b;">归档入库</span>
-              </div>
-              <div class="chip-scroll" id="candidateQuickChips"></div>
-
               <div class="form-grid-2">
                 <select class="inp-ctrl" id="corrVendorSelect" aria-label="厂商">${vendorOptsHtml}</select>
-                <input class="inp-ctrl" id="corrModelInput" type="text" placeholder="输入或点选型号，如 opus-5.5" autocomplete="off" />
+                <input class="inp-ctrl" id="corrModelInput" type="text" placeholder="型号，如 opus-5.5" autocomplete="off" />
               </div>
-
-              <div class="chip-scroll" id="vendorModelChips"></div>
-
               <div class="corr-bottom-row">
                 <div class="tier-pick-group" id="corrTierGroup">
                   <button type="button" class="tier-pick-btn" data-tier="low">LOW</button>
@@ -1448,21 +1414,6 @@
                 </div>
                 <button type="button" class="submit-ingest-btn" id="btnSubmitIngest">确认入库</button>
               </div>
-            </div>
-
-            <!-- 5. 按需展开：强度分布 + Top-5 候选 -->
-            <div class="drawer-card" id="detailsDrawer">
-              <div class="drawer-lbl">
-                <span>推理强度概率</span>
-                <span id="effortSummaryLbl">--</span>
-              </div>
-              <div class="tier-mini-bar" id="tierGrid"></div>
-
-              <div class="drawer-lbl" style="margin-top:3px;">
-                <span id="candTitle">Top-5 候选模型</span>
-                <span style="font-weight:500;">点击可带入纠错</span>
-              </div>
-              <div id="candBars"></div>
             </div>
           </div>
         </div>
@@ -1493,20 +1444,16 @@
     bindShadowEvents();
   }
 
-  function syncKwDrawerUI() {
-    if (!shadow) return;
-    shadow.getElementById("chkAutoPage").checked = activeConfig.autoPageCapture !== false;
-    shadow.getElementById("chkKwOnly").checked = Boolean(activeConfig.keywordOnlyAuto);
-    shadow.getElementById("inpCaptureKws").value = activeConfig.captureKeywords || DEFAULT_CAPTURE_KEYWORDS;
-  }
+  // v1.5.0: 关键词设置已移到插件弹窗，悬浮窗不再保留抽屉
+  function syncKwDrawerUI() {}
 
   function renderPageSpecimensBar() {
     if (!shadow) return;
     const bar = shadow.getElementById("pageSpecimensBar");
     const btnScan = shadow.getElementById("btnScanPage");
-    const list = uiState.pageSpecimens || [];
+    const list = (uiState.pageSpecimens || []).slice(0, MAX_PAGE_SPECIMENS);
 
-    btnScan.textContent = list.length > 0 ? `🔍 本页 ${list.length}` : "🔍 本页";
+    btnScan.textContent = list.length > 1 ? `本页 ${list.length}` : "本页";
 
     if (list.length <= 1) {
       bar.classList.remove("show");
@@ -1518,11 +1465,8 @@
     bar.innerHTML = list
       .map((it, idx) => {
         const kb = (it.code.length / 1024).toFixed(1);
-        const kwTag = it.kwHit ? ` 🎯${it.matchedKws[0]}` : "";
         const isAct = it.hash === uiState.currentHash ? "active" : "";
-        return `<button type="button" class="spec-tab ${isAct}" data-spec-idx="${idx}" title="${escapeHtml(
-          it.origin + (it.matchedKws.length ? " · 命中特征: " + it.matchedKws.join(", ") : "")
-        )}">#${idx + 1} ${it.type} ${kb}K${escapeHtml(kwTag)}</button>`;
+        return `<button type="button" class="spec-tab ${isAct}" data-spec-idx="${idx}">#${idx + 1} ${it.type} ${kb}K</button>`;
       })
       .join("");
 
@@ -1561,49 +1505,12 @@
       m.toLowerCase() !== uiState.detectedModel.toLowerCase() ||
       uiState.corrTier !== uiState.detectedTier;
 
-    const hint = shadow.getElementById("corrModeHint");
     const btn = shadow.getElementById("btnSubmitIngest");
-    if (isChanged) {
-      hint.textContent = "已修改 · 纠错入库";
-      hint.style.color = "#b45309";
-      if (!uiState.submittingSample) btn.textContent = "纠正并入库";
-    } else {
-      hint.textContent = "一致 · 确认归档";
-      hint.style.color = "#1f5f4b";
-      if (!uiState.submittingSample) btn.textContent = "确认入库";
-    }
+    if (!uiState.submittingSample) btn.textContent = isChanged ? "纠正并入库" : "确认入库";
   }
 
-  function renderVendorPresetChips() {
-    if (!shadow) return;
-    const vendor = shadow.getElementById("corrVendorSelect").value;
-    const curModel = shadow.getElementById("corrModelInput").value.trim().toLowerCase();
-    const extra = uiState.currentVerdict && uiState.currentVerdict.allModels ? uiState.currentVerdict.allModels : [];
-    const models = getModelsForVendor(vendor, extra);
-
-    const wrap = shadow.getElementById("vendorModelChips");
-    if (!models.length) {
-      wrap.style.display = "none";
-      wrap.innerHTML = "";
-      return;
-    }
-    wrap.style.display = "flex";
-    wrap.innerHTML = models
-      .slice(0, 12)
-      .map(
-        (m) =>
-          `<button type="button" class="quick-chip ${m.toLowerCase() === curModel ? "sel" : ""}" data-preset-model="${escapeHtml(m)}">${escapeHtml(m)}</button>`
-      )
-      .join("");
-
-    wrap.querySelectorAll("[data-preset-model]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        shadow.getElementById("corrModelInput").value = btn.dataset.presetModel;
-        renderVendorPresetChips();
-        syncCorrectionModeLabel();
-      });
-    });
-  }
+  // v1.5.0: 厂商型号快捷芯片已移除
+  function renderVendorPresetChips() {}
 
   function applyCorrectionSelection(vendorRaw, labelOrShortModel, tierOpt) {
     if (!shadow) return;
@@ -1696,90 +1603,16 @@
     });
 
     // Toggle Keyword Config Drawer
-    const btnKw = shadow.getElementById("btnToggleKwCfg");
-    btnKw.addEventListener("click", () => {
-      uiState.kwDrawerOpen = !uiState.kwDrawerOpen;
-      shadow.getElementById("kwConfigDrawer").classList.toggle("open", uiState.kwDrawerOpen);
-      btnKw.classList.toggle("active", uiState.kwDrawerOpen);
-      if (uiState.kwDrawerOpen) syncKwDrawerUI();
-    });
-
-    shadow.getElementById("btnResetKwDefault").addEventListener("click", () => {
-      shadow.getElementById("inpCaptureKws").value = DEFAULT_CAPTURE_KEYWORDS;
-    });
-
-    shadow.getElementById("btnSaveKwAndScan").addEventListener("click", async () => {
-      const nextPatch = {
-        autoPageCapture: shadow.getElementById("chkAutoPage").checked,
-        keywordOnlyAuto: shadow.getElementById("chkKwOnly").checked,
-        captureKeywords: shadow.getElementById("inpCaptureKws").value.trim() || DEFAULT_CAPTURE_KEYWORDS
-      };
-      activeConfig = { ...activeConfig, ...nextPatch };
-      uiState.kwDrawerOpen = false;
-      shadow.getElementById("kwConfigDrawer").classList.remove("open");
-      btnKw.classList.remove("active");
-      try {
-        await chrome.runtime.sendMessage({ type: "SAVE_CONFIG", patch: nextPatch });
-      } catch (_) {}
-      await executeManualPageScanAndOpen();
-    });
-
-    // Manual Refresh Clipboard Button
-    shadow.getElementById("btnRefreshClip").addEventListener("click", async () => {
-      try {
-        const raw = await chrome.runtime.sendMessage({ type: "READ_RAW_CLIPBOARD" });
-        if (raw && raw.ok && raw.hasCode && raw.code) {
-          lastKnownOsClipHash = raw.hash || "";
-          showWindowAndIdentify(raw.code, { autoTriggered: false, forceRefresh: true, originLabel: "剪贴板" });
-        } else if (uiState.currentCode) {
-          deliverToSandbox("previewFrame", "preview", uiState.currentCode);
-        }
-      } catch (_) {}
-    });
-
-    // Source Filter Pills
-    shadow.querySelectorAll(".source-pill-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const target = btn.dataset.filter;
-        uiState.sourceFilter = uiState.sourceFilter === target && target !== "all" ? "all" : target;
-        syncPillButtons();
-        renderVerdictUI();
-        chrome.runtime.sendMessage({
-          type: "SAVE_CONFIG",
-          patch: { sourceFilter: uiState.sourceFilter }
-        }).catch(() => {});
-      });
-    });
-
-    // Toggle Correction Drawer
-    const btnCorrect = shadow.getElementById("btnToggleCorrect");
-    btnCorrect.addEventListener("click", () => {
-      uiState.correctOpen = !uiState.correctOpen;
-      shadow.getElementById("correctDrawer").classList.toggle("open", uiState.correctOpen);
-      btnCorrect.classList.toggle("active", uiState.correctOpen);
-    });
-
-    // Toggle Details Drawer
-    const btnDetails = shadow.getElementById("btnToggleDetails");
-    btnDetails.addEventListener("click", () => {
-      uiState.detailsOpen = !uiState.detailsOpen;
-      shadow.getElementById("detailsDrawer").classList.toggle("open", uiState.detailsOpen);
-      btnDetails.classList.toggle("active", uiState.detailsOpen);
-      btnDetails.textContent = uiState.detailsOpen ? "收起 ▴" : "详情 ▾";
-    });
-
     // Vendor / Model / Tier controls
     shadow.getElementById("corrVendorSelect").addEventListener("change", (e) => {
       const models = getModelsForVendor(e.target.value, uiState.currentVerdict?.allModels);
       if (models.length) {
         shadow.getElementById("corrModelInput").value = models[0];
       }
-      renderVendorPresetChips();
       syncCorrectionModeLabel();
     });
 
     shadow.getElementById("corrModelInput").addEventListener("input", () => {
-      renderVendorPresetChips();
       syncCorrectionModeLabel();
     });
 
@@ -1876,7 +1709,6 @@
       lb.classList.add("open");
       deliverToSandbox("lbFrame", "lightbox", uiState.currentCode);
       shadow.getElementById("lbTitle").textContent = shadow.getElementById("heroTitle").textContent;
-      shadow.getElementById("lbLogo").innerHTML = shadow.getElementById("heroLogo").innerHTML;
     });
     shadow.getElementById("btnCloseLb").addEventListener("click", () => lb.classList.remove("open"));
     lb.addEventListener("click", (e) => {
@@ -1884,61 +1716,28 @@
     });
   }
 
-  function syncPillButtons() {
-    if (!shadow) return;
-    shadow.querySelectorAll(".source-pill-btn").forEach((b) => {
-      b.classList.toggle("active", b.dataset.filter === uiState.sourceFilter);
-    });
-  }
+  function syncPillButtons() {}
 
   function renderVerdictUI() {
     if (!shadow || !uiState.currentVerdict) return;
     const res = uiState.currentVerdict;
-    const calc = computeFilteredVerdict(res, uiState.sourceFilter);
+    uiState.sourceFilter = "all";
+    const calc = computeFilteredVerdict(res, "all");
     if (!calc) return;
 
     const { rawList, filtered, poolSum, openSharePct, closedSharePct, overallTop, activeTop, probPct, exactHit } = calc;
 
-    shadow.getElementById("pctAll").textContent = `${rawList.length}`;
-    shadow.getElementById("pctOpen").textContent = `${openSharePct}%`;
-    shadow.getElementById("pctClosed").textContent = `${closedSharePct}%`;
-
-    const rarity = activeTop.rarity || "normal";
-    const rank = activeTop.arenaRank || null;
     const tierKey = TIER_ORDER.includes(res.effortTier) ? res.effortTier : "high";
     const tierStr = TIER_SHORT[tierKey] || tierKey.toUpperCase();
 
-    const card = shadow.getElementById("verdictCard");
-    card.className = `verdict-card rarity-${rarity}`;
-    shadow.getElementById("heroLogo").innerHTML = getVendorLogoSvg(activeTop.vendor || activeTop.label, 24);
     shadow.getElementById("heroTitle").textContent = activeTop.label;
     shadow.getElementById("confPct").textContent = `${probPct}%`;
 
-    const badges = [];
-    if (rarity === "gold") badges.push(`<span class="tag gold">🥇 #${rank || 1}</span>`);
-    else if (rarity === "silver") badges.push(`<span class="tag silver">🥈 #${rank || 4}</span>`);
-    badges.push(`<span class="tag ${activeTop.isOpen ? "open" : "closed"}">${activeTop.isOpen ? "开源" : "闭源"}</span>`);
-    // Arena.ai v1.4.0: open-thinking marker ("Thought for 1 second" + brain icon) => emphasize open-source result
-    const ot = uiState.currentOpenThinking;
-    if (ot && ot.detected) {
-      badges.push(
-        `<span class="tag open-thinking" title="Arena 开源思考标记: ${escapeHtml(ot.label || "Thought")}${ot.hasCot ? " · 已暴露思考过程" : ""}">🧠 开源思考 · ${escapeHtml(ot.label || "Thought")}</span>`
-      );
-    }
-    badges.push(`<span class="tag tier">强度 ${tierStr}</span>`);
-    if (uiState.currentMatchedKws && uiState.currentMatchedKws.length > 0) {
-      const kwBrief = uiState.currentMatchedKws.slice(0, 2).join("·");
-      const kwMore = uiState.currentMatchedKws.length > 2 ? `+${uiState.currentMatchedKws.length - 2}` : "";
-      badges.push(
-        `<span class="tag kw" title="命中关键词特征: ${escapeHtml(uiState.currentMatchedKws.join(", "))}">🎯 ${escapeHtml(kwBrief + kwMore)}</span>`
-      );
-    }
-    if (res.userIngested) {
-      badges.push(`<span class="tag ingested">✓ 已${res.userIngested.isCorrection ? "纠错" : "归档"}入库</span>`);
-    } else if (exactHit && activeTop.id === overallTop.id) {
-      badges.push(`<span class="tag ingested">馆藏命中</span>`);
-    }
-    shadow.getElementById("heroBadges").innerHTML = badges.join("");
+    // v1.5.0 极简：只留一行小字（开源/闭源 · 强度），无彩色徽章、无图标
+    let sub = `${activeTop.isOpen ? "开源" : "闭源"} · ${tierStr}`;
+    if (res.userIngested) sub += ` · 已${res.userIngested.isCorrection ? "纠错" : "归档"}入库`;
+    else if (exactHit && activeTop.id === overallTop.id) sub += " · 馆藏命中";
+    shadow.getElementById("heroSub").textContent = sub;
 
     // Sync default detected model into Correction Drawer
     const detSplit = splitToShortVendorAndModel(activeTop.vendor, activeTop.label);
@@ -1947,67 +1746,7 @@
     uiState.detectedTier = tierKey;
     applyCorrectionSelection(activeTop.vendor, activeTop.label, tierKey);
 
-    // Quick-pick chips
-    const quickCands = filtered.slice(0, 4);
-    const qcWrap = shadow.getElementById("candidateQuickChips");
-    qcWrap.innerHTML = quickCands
-      .map((m, i) => `<button type="button" class="quick-chip" data-cand-idx="${i}">${escapeHtml(m.label)}</button>`)
-      .join("");
-    qcWrap.querySelectorAll("[data-cand-idx]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const chosen = quickCands[Number(btn.dataset.candIdx)];
-        if (chosen) applyCorrectionSelection(chosen.vendor, chosen.label, uiState.corrTier);
-      });
-    });
-
-    // Collapsible Details
-    const tierMap = {};
-    (res.tierProbabilities || []).forEach((tp) => { tierMap[tp.tier] = tp.probability; });
-    const effConf = res.effortConfidence ?? tierMap[tierKey] ?? 0;
-    shadow.getElementById("effortSummaryLbl").textContent = `${tierStr} (${Math.round(effConf * 100)}%)`;
-
-    shadow.getElementById("tierGrid").innerHTML = TIER_ORDER.map((t) => {
-      const p = (tierMap[t] || 0) * 100;
-      return `<div class="tier-mini-cell ${t === tierKey ? "active" : ""}">${TIER_SHORT[t]} ${p.toFixed(0)}%</div>`;
-    }).join("");
-
-    shadow.getElementById("candTitle").textContent =
-      uiState.sourceFilter === "open" ? "开源候选 Top-5" : uiState.sourceFilter === "closed" ? "闭源候选 Top-5" : "全库候选 Top-5";
-
-    const top5 = filtered.slice(0, 5);
-    shadow.getElementById("candBars").innerHTML = top5
-      .map((m, idx) => {
-        const normP =
-          uiState.sourceFilter === "all"
-            ? (Number(m.probability) || 0) * 100
-            : poolSum > 0.0005
-            ? ((Number(m.probability) || 0) / poolSum) * 100
-            : 0;
-        const pct = Math.min(100, Math.max(0, normP));
-        const fillCol = m.isOpen ? "#2b7a61" : "#4f6d8a";
-        return `<div class="cand-row" data-pick-top="${idx}" title="点击将该模型填入纠错栏">
-          ${getVendorLogoSvg(m.vendor || m.label, 17)}
-          <div>
-            <div class="cand-name"><span>${escapeHtml(m.label)}</span></div>
-            <div class="prob-track"><div class="prob-fill" style="width:${pct.toFixed(1)}%;background:${fillCol};"></div></div>
-          </div>
-          <div class="cand-pct">${pct.toFixed(1)}%</div>
-        </div>`;
-      })
-      .join("");
-
-    shadow.querySelectorAll("[data-pick-top]").forEach((row) => {
-      row.addEventListener("click", () => {
-        const picked = top5[Number(row.dataset.pickTop)];
-        if (!picked) return;
-        uiState.correctOpen = true;
-        shadow.getElementById("correctDrawer").classList.add("open");
-        shadow.getElementById("btnToggleCorrect").classList.add("active");
-        applyCorrectionSelection(picked.vendor, picked.label, uiState.corrTier);
-      });
-    });
-
-    shadow.getElementById("fabText").textContent = `${activeTop.label} · ${tierStr} (${probPct}%)`;
+    shadow.getElementById("fabText").textContent = `${activeTop.label} · ${probPct}%`;
   }
 
   async function showWindowAndIdentify(rawCode, opts = {}) {
@@ -2039,7 +1778,6 @@
     const matchedKws = Array.isArray(opts.matchedKws) ? opts.matchedKws : kwRes.matched;
 
     ensureUI();
-    syncPillButtons();
 
     uiState.visible = true;
     uiState.minimized = false;
@@ -2059,11 +1797,9 @@
     win.classList.add("show");
     shadow.getElementById("inlineToast").classList.remove("show");
 
-    const kb = (parsed.code.length / 1024).toFixed(1);
-    const prefix = uiState.currentOrigin ? `${uiState.currentOrigin} · ` : "";
-    shadow.getElementById("formatChip").textContent = `${prefix}${parsed.type} ${kb}K`;
-    shadow.getElementById("elapsedLbl").textContent = "识别中...";
-    shadow.getElementById("heroTitle").textContent = "正在识别模型...";
+    shadow.getElementById("heroTitle").textContent = "识别中...";
+    shadow.getElementById("heroSub").textContent = "";
+    shadow.getElementById("confPct").textContent = "--%";
 
     deliverToSandbox("previewFrame", "preview", parsed.code);
 
@@ -2081,16 +1817,13 @@
 
       if (res && res.ok && res.verdict) {
         uiState.currentVerdict = res.verdict;
-        shadow.getElementById("elapsedLbl").textContent = `${res.verdict.elapsedMs || 10}ms`;
         renderVerdictUI();
       } else {
-        shadow.getElementById("elapsedLbl").textContent = "异常";
         shadow.getElementById("heroTitle").textContent = "识别请求失败";
-        shadow.getElementById("heroBadges").innerHTML = `<span class="tag closed">${escapeHtml((res && res.error) || "请检查网络或配置")}</span>`;
+        shadow.getElementById("heroSub").textContent = (res && res.error) || "请检查网络或配置";
       }
     } catch (_) {
       if (myReqSeq !== identifySeq) return;
-      shadow.getElementById("elapsedLbl").textContent = "需刷新网页";
       shadow.getElementById("heroTitle").textContent = "插件已更新，请按 F5 刷新网页";
     }
   }
@@ -2212,8 +1945,6 @@
           const win = shadow.getElementById("extWin");
           shadow.getElementById("minimizedFab").classList.remove("show");
           win.classList.add("show");
-          shadow.getElementById("formatChip").textContent = `${uiState.currentType} · ${(res.code.length / 1024).toFixed(1)}K`;
-          shadow.getElementById("elapsedLbl").textContent = `${res.verdict.elapsedMs || 10}ms`;
           deliverToSandbox("previewFrame", "preview", res.code);
           renderVerdictUI();
         }
