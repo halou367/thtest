@@ -79,14 +79,18 @@
     uiState.currentOrigin = "";
     uiState.visible = false;
     uiState.minimized = false;
+    uiState.detailsOpen = false;
     if (shadow) {
       renderPageSpecimensBar();
-      if (hideWindow) {
-        const win = shadow.getElementById("extWin");
-        const fab = shadow.getElementById("minimizedFab");
-        if (win) win.classList.remove("show");
-        if (fab) fab.classList.remove("show");
+      const win = shadow.getElementById("extWin");
+      const fab = shadow.getElementById("minimizedFab");
+      if (win) {
+        win.classList.remove("details-open");
+        if (hideWindow) win.classList.remove("show");
       }
+      if (fab && hideWindow) fab.classList.remove("show");
+      const bd = shadow.getElementById("btnToggleDetails");
+      if (bd) { bd.classList.remove("active"); bd.textContent = "详情 ▾"; }
     }
   }
 
@@ -777,20 +781,22 @@
       max-height: calc(100vh - 32px);
       display: none;
       flex-direction: column;
-      border-radius: 18px;
-      background: rgba(249, 251, 254, 0.96);
+      border-radius: 16px;
+      background: rgba(250, 251, 253, 0.97);
       backdrop-filter: blur(24px) saturate(140%);
       -webkit-backdrop-filter: blur(24px) saturate(140%);
-      border: 1px solid rgba(255, 255, 255, 0.95);
-      box-shadow: 0 20px 50px rgba(15, 26, 40, 0.20), 0 4px 14px rgba(15, 26, 40, 0.08);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      box-shadow: 0 18px 44px rgba(15, 26, 40, 0.18), 0 3px 10px rgba(15, 26, 40, 0.07);
       overflow: hidden;
       pointer-events: auto;
+      transition: width 0.28s cubic-bezier(0.32, 0.72, 0.24, 1);
     }
+    .ext-window.details-open { width: 624px; }
     .ext-window.show { display: flex; }
 
     .ext-header {
-      padding: 6px 8px;
-      background: rgba(241, 245, 250, 0.92);
+      padding: 7px 10px;
+      background: rgba(248, 250, 252, 0.94);
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
@@ -865,12 +871,37 @@
     .icon-btn.active { background: rgba(36, 70, 107, 0.14); color: #1e40af; }
 
     .scroll-body {
-      padding: 9px 11px 11px;
+      padding: 10px 12px 12px;
       overflow-y: auto;
+      overflow-x: hidden;
       scrollbar-width: thin;
+      scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
+    }
+    .scroll-body::-webkit-scrollbar { width: 5px; }
+    .scroll-body::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.3); border-radius: 999px; }
+    .panel-cols { display: flex; align-items: flex-start; }
+    .main-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+    .details-col {
+      flex: 0 0 auto;
+      width: 0;
+      opacity: 0;
+      overflow: hidden;
+      transition: width 0.28s cubic-bezier(0.32, 0.72, 0.24, 1), opacity 0.18s ease, margin 0.28s cubic-bezier(0.32, 0.72, 0.24, 1);
+    }
+    .ext-window.details-open .details-col {
+      width: 244px;
+      opacity: 1;
+      margin-left: 12px;
+      border-left: 1px solid var(--line);
+      padding-left: 12px;
+    }
+    .details-head {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 11px; font-weight: 750; letter-spacing: 0.04em; color: var(--ink-soft);
+      margin-bottom: 8px;
     }
 
     /* Multi-Specimen Page Switcher Bar (Hidden when <= 1 specimen) */
@@ -885,34 +916,37 @@
     .specimens-bar::-webkit-scrollbar { display: none; }
     .spec-tab {
       appearance: none;
-      border: 1px solid var(--line-strong);
-      background: #ffffff;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.7);
       color: var(--ink-soft);
-      font-size: 10.2px;
-      font-weight: 680;
-      padding: 3px 7.5px;
-      border-radius: 7px;
+      font-size: 10.5px;
+      font-weight: 650;
+      padding: 3.5px 9px;
+      border-radius: 999px;
       cursor: pointer;
       white-space: nowrap;
       font-family: inherit;
       flex-shrink: 0;
+      transition: all 0.15s ease;
+      font-variant-numeric: tabular-nums;
     }
-    .spec-tab:hover { color: var(--ink); border-color: #64748b; }
+    .spec-tab:hover { color: var(--ink); border-color: #94a3b8; background: #ffffff; }
     .spec-tab.active {
-      background: #24466b;
+      background: var(--ink);
       color: #ffffff;
-      border-color: #24466b;
+      border-color: var(--ink);
     }
 
     /* Clean Unobstructed Live Preview Stage */
     .preview-stage-wrap {
       position: relative;
-      border-radius: 12px;
+      border-radius: 10px;
       overflow: hidden;
-      border: 1px solid var(--line-strong);
-      background: #f8fafc;
+      border: 1px solid var(--line);
+      background: #f1f5f9;
       aspect-ratio: 16 / 10;
       flex-shrink: 0;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
     }
     .svg-fallback-stage {
       position: absolute;
@@ -1005,11 +1039,11 @@
 
     /* Unified Single Verdict Card */
     .verdict-card {
-      border-radius: 12px;
-      padding: 10px 11px;
+      border-radius: 10px;
+      padding: 11px 12px 10px;
       background: #ffffff;
-      border: 1px solid var(--line-strong);
-      box-shadow: 0 2px 8px rgba(15, 26, 40, 0.03);
+      border: 1px solid var(--line);
+      box-shadow: 0 1px 3px rgba(15, 26, 40, 0.04);
     }
     .hero-sub {
       font-size: 11px;
@@ -1044,10 +1078,11 @@
       flex-shrink: 0;
     }
     .model-title {
-      font-size: 14.5px;
-      font-weight: 800;
+      font-size: 14px;
+      font-weight: 750;
       color: var(--ink);
-      line-height: 1.2;
+      line-height: 1.25;
+      letter-spacing: -0.01em;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1062,11 +1097,12 @@
 
 
     .conf-num {
-      font-size: 18px;
-      font-weight: 850;
+      font-size: 19px;
+      font-weight: 800;
       color: var(--ink);
-      letter-spacing: -0.02em;
+      letter-spacing: -0.03em;
       flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
     }
 
     .verdict-actions {
@@ -1079,12 +1115,12 @@
     }
     .act-btn {
       appearance: none;
-      border: 1px solid var(--line-strong);
-      background: #f8fafc;
+      border: 1px solid var(--line);
+      background: #ffffff;
       color: var(--ink-soft);
       font-size: 11px;
-      font-weight: 680;
-      padding: 4.5px 10px;
+      font-weight: 650;
+      padding: 5px 11px;
       border-radius: 7px;
       cursor: pointer;
       font-family: inherit;
@@ -1093,10 +1129,10 @@
       gap: 4px;
       transition: all 0.14s ease;
     }
-    .act-btn:hover { background: #ffffff; color: var(--ink); border-color: #94a3b8; }
-    .act-btn.active { background: #2b3b4e; color: #ffffff; border-color: #2b3b4e; }
-    .act-btn.correct-btn { color: #1e4b7a; border-color: rgba(43, 76, 111, 0.3); background: rgba(235, 243, 252, 0.65); }
-    .act-btn.correct-btn:hover { background: rgba(224, 237, 252, 0.95); }
+    .act-btn:hover { background: #f8fafc; color: var(--ink); border-color: #94a3b8; }
+    .act-btn.active { background: var(--ink); color: #ffffff; border-color: var(--ink); }
+    .act-btn.correct-btn { color: #1e4b7a; border-color: rgba(43, 76, 111, 0.28); background: rgba(235, 243, 252, 0.55); }
+    .act-btn.correct-btn:hover { background: rgba(224, 237, 252, 0.9); }
     .act-btn.correct-btn.active { background: #24466b; color: #ffffff; border-color: #24466b; }
 
     .toast-inline {
@@ -1127,8 +1163,9 @@
     }
     .drawer-card.open { display: flex; }
     .drawer-lbl {
-      font-size: 10.2px;
+      font-size: 10px;
       font-weight: 700;
+      letter-spacing: 0.05em;
       color: var(--muted);
       display: flex;
       align-items: center;
@@ -1256,16 +1293,17 @@
     }
     .tier-mini-cell {
       text-align: center;
-      padding: 3.5px 2px;
+      padding: 4px 2px;
       border-radius: 6px;
-      background: #f4f7fa;
+      background: #f8fafc;
       border: 1px solid var(--line);
       font-size: 10px;
       color: var(--ink-soft);
+      font-variant-numeric: tabular-nums;
     }
     .tier-mini-cell.active {
       background: #eef4fb;
-      border-color: rgba(59, 107, 156, 0.45);
+      border-color: rgba(59, 107, 156, 0.5);
       color: var(--ink);
       font-weight: 750;
     }
@@ -1279,10 +1317,11 @@
       cursor: pointer;
     }
     .cand-row:hover { background: #f4f7fb; }
-    .cand-name { font-size: 11px; font-weight: 650; color: var(--ink); }
-    .prob-track { height: 4px; border-radius: 999px; background: #e6ecf3; overflow: hidden; margin-top: 2px; }
-    .prob-fill { height: 100%; border-radius: 999px; background: #5a738e; }
-    .cand-pct { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); }
+    .cand-row:active { background: #e8eef5; }
+    .cand-name { font-size: 11px; font-weight: 650; color: var(--ink); line-height: 1.3; }
+    .prob-track { height: 3px; border-radius: 999px; background: #e6ecf3; overflow: hidden; margin-top: 3px; }
+    .prob-fill { height: 100%; border-radius: 999px; background: #64748b; }
+    .cand-pct { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 
     .minimized-fab {
       display: none;
@@ -1376,44 +1415,32 @@
             <!-- v1.5.0: 最多 2 个当前页样本 -->
             <div class="specimens-bar" id="pageSpecimensBar"></div>
 
-            <div class="preview-stage-wrap">
-              <div class="drag-shield"></div>
-              <div class="svg-fallback-stage" id="svgFallbackStage"></div>
-              <iframe id="previewFrame" title="SVG/HTML 实时预览"></iframe>
-              <button class="stage-corner-btn" id="btnOpenLb" type="button" title="放大全屏预览">放大</button>
-            </div>
-
-            <div class="verdict-card" id="verdictCard">
-              <div class="verdict-main">
-                <div style="min-width:0;">
-                  <div class="model-title" id="heroTitle">识别中...</div>
-                  <div class="hero-sub" id="heroSub"></div>
+            <div class="panel-cols">
+              <div class="main-col">
+                <div class="preview-stage-wrap">
+                  <div class="drag-shield"></div>
+                  <div class="svg-fallback-stage" id="svgFallbackStage"></div>
+                  <iframe id="previewFrame" title="SVG/HTML 实时预览"></iframe>
+                  <button class="stage-corner-btn" id="btnOpenLb" type="button" title="放大全屏预览">放大</button>
                 </div>
-                <div class="conf-num" id="confPct">--%</div>
-              </div>
-              <div class="verdict-actions">
-                <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">纠正 / 入库</button>
-                <button class="act-btn" id="btnToggleDetails" type="button">详情 ▾</button>
-              </div>
-            </div>
 
-            <div class="toast-inline" id="inlineToast"></div>
+                <div class="verdict-card" id="verdictCard">
+                  <div class="verdict-main">
+                    <div style="min-width:0;">
+                      <div class="model-title" id="heroTitle">识别中...</div>
+                      <div class="hero-sub" id="heroSub"></div>
+                    </div>
+                    <div class="conf-num" id="confPct">--%</div>
+                  </div>
+                  <div class="verdict-actions">
+                    <button class="act-btn correct-btn" id="btnToggleCorrect" type="button">纠正 / 入库</button>
+                    <button class="act-btn" id="btnToggleDetails" type="button">详情 ▾</button>
+                  </div>
+                </div>
 
-            <!-- 详情展开：强度概率 + Top-5 候选（v1.5.1 恢复，极简中性样式） -->
-            <div class="drawer-card" id="detailsDrawer">
-              <div class="drawer-lbl">
-                <span>推理强度</span>
-                <span id="effortSummaryLbl">--</span>
-              </div>
-              <div class="tier-mini-bar" id="tierGrid"></div>
-              <div class="drawer-lbl" style="margin-top:3px;">
-                <span>候选模型</span>
-                <span style="font-weight:500;">点击带入纠错</span>
-              </div>
-              <div id="candBars"></div>
-            </div>
+                <div class="toast-inline" id="inlineToast"></div>
 
-            <div class="drawer-card" id="correctDrawer">
+                <div class="drawer-card" id="correctDrawer">
               <div class="form-grid-2">
                 <select class="inp-ctrl" id="corrVendorSelect" aria-label="厂商">${vendorOptsHtml}</select>
                 <input class="inp-ctrl" id="corrModelInput" type="text" placeholder="型号，如 opus-5.5" autocomplete="off" />
@@ -1427,6 +1454,26 @@
                 </div>
                 <button type="button" class="submit-ingest-btn" id="btnSubmitIngest">确认入库</button>
               </div>
+                </div>
+              </div>
+
+              <!-- 详情：右侧栏（v1.5.2 双栏展开） -->
+              <aside class="details-col" id="detailsDrawer">
+                <div class="details-head">
+                  <span>详情</span>
+                  <button class="icon-btn" id="btnCloseDetails" type="button" title="收起详情">×</button>
+                </div>
+                <div class="drawer-lbl">
+                  <span>推理强度</span>
+                  <span id="effortSummaryLbl">--</span>
+                </div>
+                <div class="tier-mini-bar" id="tierGrid"></div>
+                <div class="drawer-lbl" style="margin-top:10px;">
+                  <span>候选模型</span>
+                  <span style="font-weight:500;">点击带入纠错</span>
+                </div>
+                <div id="candBars"></div>
+              </aside>
             </div>
           </div>
         </div>
@@ -1623,14 +1670,16 @@
       btnCorrect.classList.toggle("active", uiState.correctOpen);
     });
 
-    // Toggle Details Drawer (v1.5.1 恢复：强度概率 + Top-5 候选)
+    // Toggle Details Drawer (v1.5.2: 右侧栏双栏展开)
     const btnDetails = shadow.getElementById("btnToggleDetails");
-    btnDetails.addEventListener("click", () => {
-      uiState.detailsOpen = !uiState.detailsOpen;
-      shadow.getElementById("detailsDrawer").classList.toggle("open", uiState.detailsOpen);
-      btnDetails.classList.toggle("active", uiState.detailsOpen);
-      btnDetails.textContent = uiState.detailsOpen ? "收起 ▴" : "详情 ▾";
-    });
+    const setDetailsOpen = (open) => {
+      uiState.detailsOpen = open;
+      win.classList.toggle("details-open", open);
+      btnDetails.classList.toggle("active", open);
+      btnDetails.textContent = open ? "收起 ▴" : "详情 ▾";
+    };
+    btnDetails.addEventListener("click", () => setDetailsOpen(!uiState.detailsOpen));
+    shadow.getElementById("btnCloseDetails").addEventListener("click", () => setDetailsOpen(false));
 
     // Vendor / Model / Tier controls
     shadow.getElementById("corrVendorSelect").addEventListener("change", (e) => {

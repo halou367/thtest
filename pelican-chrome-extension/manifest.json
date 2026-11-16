@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "鹈鹕实验室 · 剪贴板与页面模型鉴定助手",
   "short_name": "鹈鹕鉴定",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "极简悬浮鉴定：只显示当前页最近 2 个 SVG/HTML 样本（换页即清空），预览 + 模型 + 概率 + 开源/闭源·强度 + 纠正入库，无多余徽章与抽屉。",
   "permissions": [
     "storage",
